@@ -1,6 +1,7 @@
 const { Client, LocalAuth } = require("whatsapp-web.js");
 const qrcode = require("qrcode-terminal");
 const fs = require("fs");
+const puppeteer = require("puppeteer");
 
 // Determine if we're in production (Render.com) or development
 const isProduction = process.env.NODE_ENV === "production";
@@ -179,7 +180,7 @@ whatsappClient.on("message", async (msg) => {
   }
 });
 
-// Add initialization with staged approach to avoid timeout
+// Simplified initialization approach that uses the standard method
 const initialize = async () => {
   debugLog("Starting WhatsApp client initialization...");
 
@@ -187,25 +188,9 @@ const initialize = async () => {
   debugLog(`Initial memory usage: ${JSON.stringify(process.memoryUsage())}`);
 
   try {
-    // Stage 1: Launch browser
-    debugLog("Stage 1: Preparing to launch browser");
-
-    // Use direct initialization instead of _initialize to have more control
-    const browser = await whatsappClient.pupBrowser;
-    if (!browser) {
-      debugLog("Browser instance not available, creating it manually");
-      whatsappClient.pupBrowser = await whatsappClient.options.puppeteer.launch(
-        whatsappClient.options.puppeteer
-      );
-
-      debugLog("Browser launched successfully");
-      debugLog(
-        `Memory after browser launch: ${JSON.stringify(process.memoryUsage())}`
-      );
-    }
-
-    // Stage 2: Initialize main client
-    debugLog("Stage 2: Starting client initialization");
+    // Let whatsapp-web.js handle the initialization process directly
+    // This is the recommended approach in their documentation
+    debugLog("Starting standard WhatsApp client initialization");
     await whatsappClient.initialize();
 
     debugLog("WhatsApp client initialization completed successfully");
@@ -252,6 +237,7 @@ const initialize = async () => {
   }
 };
 
+// Replace the default initialize method with our custom one
 whatsappClient.initialize = initialize;
 
 module.exports = whatsappClient;
