@@ -30,48 +30,58 @@ const debugLog = (message) => {
 
 debugLog("Setting up WhatsApp client configuration");
 
+// Extra low memory settings for Puppeteer
+const puppeteerConfig = {
+  headless: true,
+  args: [
+    "--no-sandbox",
+    "--disable-setuid-sandbox",
+    "--disable-dev-shm-usage",
+    "--disable-accelerated-2d-canvas",
+    "--no-first-run",
+    "--no-zygote",
+    "--single-process",
+    "--disable-gpu",
+    "--disable-extensions",
+    "--disable-software-rasterizer",
+    "--disable-features=site-per-process",
+    "--js-flags=--max-old-space-size=256", // More aggressive memory limit
+    "--disable-web-security",
+    "--window-size=800,600",
+    "--disable-notifications",
+    "--disable-desktop-notifications",
+    "--disable-component-extensions-with-background-pages",
+    "--disable-default-apps",
+    "--mute-audio",
+    "--disable-speech-api",
+    "--hide-scrollbars",
+  ],
+  timeout: 240000, // 4 minutes timeout
+  executablePath: isProduction ? "/usr/bin/google-chrome-stable" : undefined,
+  defaultViewport: {
+    width: 800,
+    height: 600,
+  },
+  ignoreHTTPSErrors: true,
+  handleSIGINT: false,
+  handleSIGTERM: false,
+  handleSIGHUP: false,
+};
+
 // Configure WhatsApp client with appropriate settings for environment
 const whatsappClient = new Client({
   authStrategy: new LocalAuth({
     dataPath: "./auth_data",
     clientId: "whatsapp-bot",
   }),
-  puppeteer: {
-    headless: true,
-    args: [
-      "--no-sandbox",
-      "--disable-setuid-sandbox",
-      "--disable-dev-shm-usage",
-      "--disable-accelerated-2d-canvas",
-      "--no-first-run",
-      "--no-zygote",
-      "--single-process",
-      "--disable-gpu",
-      "--disable-extensions",
-      "--disable-software-rasterizer",
-      "--disable-features=site-per-process",
-      "--js-flags=--max-old-space-size=500", // Limit Chrome memory usage
-      "--disable-web-security",
-      "--window-size=800,600",
-    ],
-    timeout: 180000, // 3 minutes timeout for slower environments
-    executablePath: isProduction ? "/usr/bin/google-chrome-stable" : undefined,
-    // Add low memory usage settings
-    defaultViewport: {
-      width: 800,
-      height: 600,
-    },
-    ignoreHTTPSErrors: true,
-    handleSIGINT: false,
-    handleSIGTERM: false,
-    handleSIGHUP: false,
-  },
+  puppeteer: puppeteerConfig,
+  // Reduce cache usage with remote cache
   webVersionCache: {
     type: "remote",
   },
-  // Add a 10 minute timeout for the entire initialization process
-  authTimeoutMs: 600000,
-  qrTimeoutMs: 60000,
+  // Extend timeouts
+  authTimeoutMs: 900000, // 15 minutes
+  qrTimeoutMs: 90000, // 1.5 minutes
   takeoverTimeoutMs: 300000,
 });
 
@@ -169,22 +179,34 @@ whatsappClient.on("message", async (msg) => {
   }
 });
 
-// Add initialization with timeout and retry logic
+// Add initialization with staged approach to avoid timeout
 const initialize = async () => {
   debugLog("Starting WhatsApp client initialization...");
 
-  // Add timeout control for initialization
-  const timeoutPromise = new Promise((_, reject) => {
-    setTimeout(() => {
-      reject(
-        new Error("WhatsApp client initialization timed out after 3 minutes")
-      );
-    }, 180000); // 3 minutes timeout
-  });
+  // Log memory usage at start
+  debugLog(`Initial memory usage: ${JSON.stringify(process.memoryUsage())}`);
 
   try {
-    // Race between normal initialization and timeout
-    await Promise.race([whatsappClient._initialize(), timeoutPromise]);
+    // Stage 1: Launch browser
+    debugLog("Stage 1: Preparing to launch browser");
+
+    // Use direct initialization instead of _initialize to have more control
+    const browser = await whatsappClient.pupBrowser;
+    if (!browser) {
+      debugLog("Browser instance not available, creating it manually");
+      whatsappClient.pupBrowser = await whatsappClient.options.puppeteer.launch(
+        whatsappClient.options.puppeteer
+      );
+
+      debugLog("Browser launched successfully");
+      debugLog(
+        `Memory after browser launch: ${JSON.stringify(process.memoryUsage())}`
+      );
+    }
+
+    // Stage 2: Initialize main client
+    debugLog("Stage 2: Starting client initialization");
+    await whatsappClient.initialize();
 
     debugLog("WhatsApp client initialization completed successfully");
     return true;
@@ -195,18 +217,35 @@ const initialize = async () => {
       debugLog(`Stack trace: ${error.stack}`);
     }
 
-    // Check for common error patterns
-    if (
-      error.message.includes("timeout") ||
+    // Check for common error patterns and provide more specific feedback
+    if (error.message.includes("timeout")) {
+      debugLog(
+        "ERROR: Initialization timed out. This is likely due to insufficient memory."
+      );
+      debugLog(
+        "Suggestion: Upgrade your Render.com instance to at least 2GB RAM."
+      );
+    } else if (
       error.message.includes("browser") ||
       error.message.includes("Puppeteer")
     ) {
       debugLog(
-        "Error appears to be related to browser/Puppeteer. This is often due to resource constraints."
+        "ERROR: Browser/Puppeteer issue detected. This could be due to resource constraints."
       );
       debugLog(
-        "Current memory usage: " + JSON.stringify(process.memoryUsage())
+        `Memory usage details: ${JSON.stringify(process.memoryUsage())}`
       );
+    }
+
+    // Try to kill any zombie Chrome processes
+    try {
+      debugLog("Attempting to clean up Chrome processes");
+      if (isProduction) {
+        require("child_process").execSync("pkill -9 chrome");
+        debugLog("Chrome processes terminated");
+      }
+    } catch (cleanupError) {
+      debugLog(`Failed to clean up Chrome processes: ${cleanupError.message}`);
     }
 
     return false;
