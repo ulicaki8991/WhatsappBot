@@ -75,12 +75,44 @@
         background-color: #f7c8c8;
         color: #5d0a0a;
       }
+      .disconnected-tools {
+        text-align: center;
+        margin-top: 15px;
+        padding: 10px;
+        background-color: #fff9e3;
+        border-radius: 4px;
+        border: 1px solid #d9d0ad;
+        display: none;
+      }
+      .fix-connection-btn {
+        background-color: #d32f2f;
+        color: white;
+        border: none;
+        padding: 6px 12px;
+        border-radius: 4px;
+        cursor: pointer;
+        font-size: 14px;
+        margin-left: 10px;
+      }
+      .fix-connection-btn:hover {
+        background-color: #b71c1c;
+      }
     </style>
   </head>
   <body>
     <h1>WhatsApp Price Notification Sender</h1>
 
     <div class="status" id="status">Checking connection status...</div>
+
+    <div class="disconnected-tools" id="connectionTools">
+      <span>Connection issue detected.</span>
+      <button id="fixConnectionBtn" class="fix-connection-btn">
+        Fix Connection
+      </button>
+      <a href="/dashboard" target="_blank" style="margin-left: 10px"
+        >Open Dashboard</a
+      >
+    </div>
 
     <div class="form-container">
       <form id="priceForm">
@@ -146,12 +178,16 @@
         .then((response) => response.json())
         .then((data) => {
           const statusElement = document.getElementById("status");
+          const connectionTools = document.getElementById("connectionTools");
+
           if (data.status === "Connected") {
             statusElement.classList.add("connected");
             statusElement.textContent = "WhatsApp Client: Connected";
+            connectionTools.style.display = "none";
           } else {
             statusElement.classList.add("disconnected");
             statusElement.textContent = "WhatsApp Client: Not Connected";
+            connectionTools.style.display = "block";
           }
         })
         .catch((error) => {
@@ -223,6 +259,44 @@
               responseContainer.style.display = "block";
               responseData.textContent = "Error sending message: " + error;
             });
+        });
+
+      // Add fix connection functionality
+      document
+        .getElementById("fixConnectionBtn")
+        .addEventListener("click", async function () {
+          if (
+            confirm(
+              "This will reset the WhatsApp connection and may require scanning a new QR code in the logs. Continue?"
+            )
+          ) {
+            this.disabled = true;
+            this.textContent = "Reconnecting...";
+
+            try {
+              const response = await fetch("/force-reconnect", {
+                method: "POST",
+              });
+
+              if (!response.ok) {
+                throw new Error(`HTTP error ${response.status}`);
+              }
+
+              const data = await response.json();
+              alert(
+                "Reconnection process initiated. Please wait 30-60 seconds for the system to reconnect."
+              );
+
+              // Check status again after 20 seconds
+              setTimeout(() => {
+                window.location.reload();
+              }, 20000);
+            } catch (error) {
+              alert("Error triggering reconnection: " + error.message);
+              this.disabled = false;
+              this.textContent = "Fix Connection";
+            }
+          }
         });
     </script>
   </body>

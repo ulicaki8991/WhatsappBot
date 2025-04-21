@@ -2,6 +2,7 @@ const express = require("express");
 const path = require("path");
 const messageRouter = require("./routes/messageRouter");
 const whatsappClient = require("./services/WhatsppClient");
+const fs = require("fs");
 
 console.log("===========================================");
 console.log("Starting WhatsApp Bot service...");
@@ -64,6 +65,32 @@ app.use("/api", messageRouter);
 
 // For backwards compatibility
 app.use(messageRouter);
+
+// Force reconnect endpoint
+app.post("/force-reconnect", async (req, res) => {
+  console.log("Manual reconnection requested");
+
+  try {
+    // Use the forceCleanAuth function to properly clean up and reconnect
+    const result = await whatsappClient.forceCleanAuth();
+
+    res.status(200).json({
+      success: true,
+      message:
+        "Reconnection process triggered. Check logs for QR code if needed.",
+      result: result
+        ? "Initialization started successfully"
+        : "Initialization may have failed",
+    });
+  } catch (error) {
+    console.error("Error during forced reconnection:", error);
+    res.status(500).json({
+      success: false,
+      message: "Error during reconnection process",
+      error: error.message,
+    });
+  }
+});
 
 // Serve the main HTML file at the root
 app.get("/", (req, res) => {

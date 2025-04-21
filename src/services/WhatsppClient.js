@@ -377,6 +377,31 @@ const initialize = async () => {
   isInitializing = true;
   global.isInitializing = true; // Set global flag
 
+  // Add this check to clear auth data if needed
+  try {
+    // Check if authentication files exist but might be corrupted
+    const authPath = "./auth_data";
+    if (fs.existsSync(authPath)) {
+      // Look for session data files
+      const files = fs.readdirSync(authPath);
+      if (files.length > 0 && !files.some((f) => f.includes("session"))) {
+        debugLog("Possible corrupted auth data found, cleaning...");
+        for (const file of files) {
+          if (file !== ".gitkeep" && file !== "restart_trigger") {
+            try {
+              fs.unlinkSync(path.join(authPath, file));
+              debugLog(`Removed potentially corrupted auth file: ${file}`);
+            } catch (e) {
+              debugLog(`Failed to remove file ${file}: ${e.message}`);
+            }
+          }
+        }
+      }
+    }
+  } catch (e) {
+    debugLog(`Error checking auth data: ${e.message}`);
+  }
+
   debugLog("Starting WhatsApp client initialization...");
 
   // Check if we've exceeded max retries
@@ -585,6 +610,63 @@ whatsappClient.sendMessage = async function (chatId, content, options) {
 
     throw error;
   }
+};
+
+// Function to force clean authentication data
+whatsappClient.forceCleanAuth = async function () {
+  debugLog("Force cleaning authentication data");
+
+  // First close browser if it exists
+  if (this.pupBrowser) {
+    try {
+      debugLog("Closing browser");
+      await this.pupBrowser.close().catch((e) => {
+        debugLog(`Error closing browser: ${e.message}`);
+      });
+    } catch (e) {
+      debugLog(`Error closing browser: ${e.message}`);
+    }
+  }
+
+  // Reset flags
+  isClientReady = false;
+
+  // Clean auth data
+  try {
+    const authPath = "./auth_data";
+    debugLog("Removing auth data");
+
+    // Delete auth data files but keep directory
+    if (fs.existsSync(authPath)) {
+      const files = fs.readdirSync(authPath);
+      for (const file of files) {
+        if (file !== ".gitkeep") {
+          fs.unlinkSync(path.join(authPath, file));
+        }
+      }
+      debugLog("Auth data cleaned");
+    }
+  } catch (e) {
+    debugLog(`Error cleaning auth data: ${e.message}`);
+  }
+
+  // Make sure initialization flags are reset
+  isInitializing = false;
+  global.isInitializing = false;
+
+  // Trigger re-initialization
+  debugLog("Scheduling re-initialization");
+  return new Promise((resolve) => {
+    setTimeout(async () => {
+      try {
+        const result = await initialize();
+        resolve(result);
+      } catch (e) {
+        debugLog(`Error during re-initialization: ${e.message}`);
+        resolve(false);
+      }
+    }, 3000);
+  });
 };
 
 module.exports = whatsappClient;
