@@ -1,0 +1,13 @@
+services:
+  - type: web
+    name: whatsapp-price-bot
+    env: node
+    plan: standard
+    buildCommand: npm install
+    startCommand: node src/index.js
+    envVars:
+      - key: NODE_VERSION
+        value: 16.x
+    scaling:
+      minInstances: 1
+      maxInstances: 1 

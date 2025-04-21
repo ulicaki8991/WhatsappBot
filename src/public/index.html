@@ -1,0 +1,229 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>WhatsApp Price Notification</title>
+    <style>
+      body {
+        font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
+        max-width: 800px;
+        margin: 0 auto;
+        padding: 20px;
+        background-color: #f9f9f9;
+      }
+      h1 {
+        color: #075e54;
+        text-align: center;
+      }
+      .form-container {
+        background-color: white;
+        padding: 20px;
+        border-radius: 8px;
+        box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+      }
+      .form-group {
+        margin-bottom: 15px;
+      }
+      label {
+        display: block;
+        margin-bottom: 5px;
+        font-weight: 500;
+      }
+      input,
+      select,
+      textarea {
+        width: 100%;
+        padding: 8px;
+        border: 1px solid #ddd;
+        border-radius: 4px;
+        box-sizing: border-box;
+      }
+      button {
+        background-color: #128c7e;
+        color: white;
+        border: none;
+        padding: 10px 15px;
+        border-radius: 4px;
+        cursor: pointer;
+        font-size: 16px;
+      }
+      button:hover {
+        background-color: #075e54;
+      }
+      .custom-template {
+        display: none;
+      }
+      .response-container {
+        margin-top: 20px;
+        background-color: #f0f0f0;
+        padding: 15px;
+        border-radius: 8px;
+        display: none;
+      }
+      .status {
+        text-align: center;
+        padding: 10px;
+        border-radius: 4px;
+        margin-bottom: 20px;
+      }
+      .connected {
+        background-color: #c8f7c8;
+        color: #0a5d0a;
+      }
+      .disconnected {
+        background-color: #f7c8c8;
+        color: #5d0a0a;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>WhatsApp Price Notification Sender</h1>
+
+    <div class="status" id="status">Checking connection status...</div>
+
+    <div class="form-container">
+      <form id="priceForm">
+        <div class="form-group">
+          <label for="phone">Phone Number (with country code):</label>
+          <input
+            type="text"
+            id="phone"
+            placeholder="e.g. 14155238886"
+            required
+          />
+        </div>
+
+        <div class="form-group">
+          <label for="price">Price:</label>
+          <input
+            type="number"
+            id="price"
+            step="0.01"
+            min="0"
+            placeholder="e.g. 99.99"
+            required
+          />
+        </div>
+
+        <div class="form-group">
+          <label for="currency">Currency Symbol:</label>
+          <input type="text" id="currency" value="$" maxlength="3" />
+        </div>
+
+        <div class="form-group">
+          <label for="templateType">Message Template:</label>
+          <select id="templateType">
+            <option value="priceNotification">Price Notification</option>
+            <option value="paymentConfirmation">Payment Confirmation</option>
+            <option value="custom">Custom Template</option>
+          </select>
+        </div>
+
+        <div class="form-group custom-template" id="customTemplateGroup">
+          <label for="customTemplate"
+            >Custom Template (use {price} as placeholder):</label
+          >
+          <textarea
+            id="customTemplate"
+            rows="3"
+            placeholder="Your custom price is {price}"
+          ></textarea>
+        </div>
+
+        <button type="submit">Send WhatsApp Message</button>
+      </form>
+    </div>
+
+    <div class="response-container" id="responseContainer">
+      <h3>Response:</h3>
+      <pre id="responseData"></pre>
+    </div>
+
+    <script>
+      // Check connection status on page load
+      fetch("/status")
+        .then((response) => response.json())
+        .then((data) => {
+          const statusElement = document.getElementById("status");
+          if (data.status === "Connected") {
+            statusElement.classList.add("connected");
+            statusElement.textContent = "WhatsApp Client: Connected";
+          } else {
+            statusElement.classList.add("disconnected");
+            statusElement.textContent = "WhatsApp Client: Not Connected";
+          }
+        })
+        .catch((error) => {
+          document.getElementById("status").textContent =
+            "Error checking connection status";
+          console.error("Error:", error);
+        });
+
+      // Show/hide custom template field based on template selection
+      document
+        .getElementById("templateType")
+        .addEventListener("change", function () {
+          const customTemplateGroup = document.getElementById(
+            "customTemplateGroup"
+          );
+          if (this.value === "custom") {
+            customTemplateGroup.style.display = "block";
+          } else {
+            customTemplateGroup.style.display = "none";
+          }
+        });
+
+      // Form submission
+      document
+        .getElementById("priceForm")
+        .addEventListener("submit", function (e) {
+          e.preventDefault();
+
+          const phone = document.getElementById("phone").value;
+          const price = parseFloat(document.getElementById("price").value);
+          const currency = document.getElementById("currency").value;
+          const templateType = document.getElementById("templateType").value;
+          const customTemplate =
+            document.getElementById("customTemplate").value;
+
+          const data = {
+            number: phone,
+            price: price,
+            currency: currency,
+            templateType: templateType,
+          };
+
+          if (templateType === "custom") {
+            data.customTemplate = customTemplate;
+          }
+
+          fetch("/send-price-notification", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify(data),
+          })
+            .then((response) => response.json())
+            .then((data) => {
+              const responseContainer =
+                document.getElementById("responseContainer");
+              const responseData = document.getElementById("responseData");
+
+              responseContainer.style.display = "block";
+              responseData.textContent = JSON.stringify(data, null, 2);
+            })
+            .catch((error) => {
+              console.error("Error:", error);
+              const responseContainer =
+                document.getElementById("responseContainer");
+              const responseData = document.getElementById("responseData");
+
+              responseContainer.style.display = "block";
+              responseData.textContent = "Error sending message: " + error;
+            });
+        });
+    </script>
+  </body>
+</html>

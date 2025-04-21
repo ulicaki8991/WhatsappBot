@@ -1,0 +1,24 @@
+{
+  "name": "whatsappbot",
+  "version": "1.0.0",
+  "main": "src/index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "start": "node src/index.js",
+    "dev": "NODE_ENV=development node src/index.js",
+    "prod": "NODE_ENV=production node src/index.js"
+  },
+  "engines": {
+    "node": ">=14.x"
+  },
+  "author": "",
+  "license": "ISC",
+  "description": "WhatsApp Bot for sending price notifications",
+  "dependencies": {
+    "express": "^5.1.0",
+    "qrcode-terminal": "^0.12.0",
+    "whatsapp-web.js": "^1.27.0",
+    "path": "^0.12.7",
+    "puppeteer": "^13.5.1"
+  }
+}
