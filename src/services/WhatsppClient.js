@@ -6,6 +6,9 @@ const puppeteer = require("puppeteer");
 // Determine if we're in production (Render.com) or development
 const isProduction = process.env.NODE_ENV === "production";
 
+// Add initialization flag to prevent multiple calls
+let isInitializing = false;
+
 console.log(`Running in ${isProduction ? "PRODUCTION" : "DEVELOPMENT"} mode`);
 console.log(
   `System memory: ${
@@ -156,6 +159,9 @@ whatsappClient.on("disconnected", (reason) => {
   debugLog(`WhatsApp client disconnected: ${reason}`);
   debugLog("Attempting to reconnect...");
 
+  // Reset initialization flag
+  isInitializing = false;
+
   // Try to reconnect after a short delay
   setTimeout(() => {
     initialize().catch((err) => {
@@ -180,20 +186,28 @@ whatsappClient.on("message", async (msg) => {
   }
 });
 
-// Simplified initialization approach that uses the standard method
+// Simplified initialization approach that uses the standard method and prevents multiple calls
 const initialize = async () => {
+  // Prevent multiple simultaneous initialization attempts
+  if (isInitializing) {
+    debugLog("Initialization already in progress, skipping duplicate call");
+    return false;
+  }
+
+  isInitializing = true;
   debugLog("Starting WhatsApp client initialization...");
 
   // Log memory usage at start
   debugLog(`Initial memory usage: ${JSON.stringify(process.memoryUsage())}`);
 
   try {
-    // Let whatsapp-web.js handle the initialization process directly
-    // This is the recommended approach in their documentation
-    debugLog("Starting standard WhatsApp client initialization");
-    await whatsappClient.initialize();
+    // Use the original initialize method from the Client prototype
+    // This ensures we're calling the library's method, not our overridden one
+    const originalInitialize = Client.prototype.initialize;
+    await originalInitialize.call(whatsappClient);
 
     debugLog("WhatsApp client initialization completed successfully");
+    isInitializing = false;
     return true;
   } catch (error) {
     debugLog(`WhatsApp client initialization failed: ${error.message}`);
@@ -233,9 +247,13 @@ const initialize = async () => {
       debugLog(`Failed to clean up Chrome processes: ${cleanupError.message}`);
     }
 
+    isInitializing = false;
     return false;
   }
 };
+
+// Store the original initialize method for reference
+const originalInitialize = whatsappClient.initialize;
 
 // Replace the default initialize method with our custom one
 whatsappClient.initialize = initialize;
