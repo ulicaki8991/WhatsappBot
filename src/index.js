@@ -70,6 +70,11 @@ app.get("/", (req, res) => {
   res.sendFile(path.join(__dirname, "public", "index.html"));
 });
 
+// Serve the health dashboard
+app.get("/dashboard", (req, res) => {
+  res.sendFile(path.join(__dirname, "public", "health.html"));
+});
+
 // Enhanced health check endpoint for Render
 app.get("/health", (req, res) => {
   const clientInfo = whatsappClient.info;
@@ -90,14 +95,26 @@ app.get("/health", (req, res) => {
   // Check if we need authentication
   const needsAuth = !isAuthenticated && process.uptime() > 60;
 
+  // Safely get the connection timestamp if available
+  let connectedAt = null;
+  try {
+    if (clientInfo && clientInfo.lastConnect) {
+      const connectTime = new Date(clientInfo.lastConnect);
+      // Validate the date is valid before trying to format it
+      if (!isNaN(connectTime.getTime())) {
+        connectedAt = connectTime.toISOString();
+      }
+    }
+  } catch (e) {
+    console.error("Error formatting connection timestamp:", e);
+  }
+
   res.status(200).json({
     status: "OK",
     uptime: process.uptime(),
     whatsapp: {
       status: clientStatus,
-      connectedAt: clientInfo
-        ? new Date(clientInfo.lastConnect).toISOString()
-        : null,
+      connectedAt: connectedAt,
       needsAuthentication: needsAuth,
       isAuthenticated: isAuthenticated,
       isFullyReady: isReady,

@@ -1,0 +1,278 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>WhatsApp Connector Health Dashboard</title>
+    <style>
+      body {
+        font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
+        max-width: 800px;
+        margin: 0 auto;
+        padding: 20px;
+        background-color: #f9f9f9;
+      }
+      h1 {
+        color: #075e54;
+        text-align: center;
+      }
+      .status-panel {
+        background-color: white;
+        padding: 20px;
+        border-radius: 8px;
+        box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+        margin-bottom: 20px;
+      }
+      .status-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 15px;
+      }
+      .status-indicator {
+        font-weight: bold;
+        padding: 8px 16px;
+        border-radius: 20px;
+        text-align: center;
+      }
+      .connected {
+        background-color: #c8f7c8;
+        color: #0a5d0a;
+      }
+      .initializing {
+        background-color: #fff2c8;
+        color: #8a6d00;
+      }
+      .disconnected {
+        background-color: #f7c8c8;
+        color: #5d0a0a;
+      }
+      .status-details {
+        margin-top: 20px;
+        font-family: monospace;
+        white-space: pre-wrap;
+        padding: 10px;
+        background-color: #f0f0f0;
+        border-radius: 4px;
+      }
+      .action-buttons {
+        display: flex;
+        justify-content: center;
+        gap: 15px;
+        margin-top: 20px;
+      }
+      button {
+        background-color: #128c7e;
+        color: white;
+        border: none;
+        padding: 10px 15px;
+        border-radius: 4px;
+        cursor: pointer;
+        font-size: 16px;
+      }
+      button:hover {
+        background-color: #075e54;
+      }
+      .auto-refresh {
+        text-align: center;
+        margin: 20px 0;
+        font-size: 14px;
+        color: #666;
+      }
+      .qr-panel {
+        display: none;
+        margin-top: 20px;
+        text-align: center;
+      }
+      .qr-code {
+        max-width: 300px;
+        margin: 0 auto;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>WhatsApp Connector Health Dashboard</h1>
+
+    <div class="status-panel">
+      <div class="status-header">
+        <h2>Connection Status</h2>
+        <div class="status-indicator initializing" id="statusIndicator">
+          Checking...
+        </div>
+      </div>
+
+      <div id="lastUpdated" class="auto-refresh">Last updated: Checking...</div>
+
+      <div class="status-details" id="statusDetails">
+        Loading status information...
+      </div>
+
+      <div class="action-buttons">
+        <button id="refreshButton">Refresh Status</button>
+        <button id="checkHealthButton">Check API Health</button>
+      </div>
+    </div>
+
+    <div class="qr-panel" id="qrPanel">
+      <h2>QR Code</h2>
+      <p>Scan this QR code with your WhatsApp app to authenticate:</p>
+      <div id="qrContainer" class="qr-code">
+        <p>QR code will appear here when needed</p>
+      </div>
+    </div>
+
+    <script>
+      // State variables
+      let autoRefreshInterval = null;
+      const AUTO_REFRESH_SECONDS = 10;
+
+      // DOM elements
+      const statusIndicator = document.getElementById("statusIndicator");
+      const statusDetails = document.getElementById("statusDetails");
+      const lastUpdated = document.getElementById("lastUpdated");
+      const refreshButton = document.getElementById("refreshButton");
+      const checkHealthButton = document.getElementById("checkHealthButton");
+      const qrPanel = document.getElementById("qrPanel");
+      const qrContainer = document.getElementById("qrContainer");
+
+      // Helper functions
+      function formatDate(date) {
+        return new Date(date).toLocaleString();
+      }
+
+      function updateLastUpdated() {
+        lastUpdated.textContent = `Last updated: ${formatDate(new Date())}`;
+      }
+
+      // Status checks
+      async function checkStatus() {
+        try {
+          const response = await fetch("/status");
+          if (!response.ok) {
+            throw new Error(`HTTP error ${response.status}`);
+          }
+
+          const data = await response.json();
+
+          // Update status indicator
+          statusIndicator.className = "status-indicator";
+          if (data.status === "Connected") {
+            statusIndicator.classList.add("connected");
+            statusIndicator.textContent = "Connected";
+          } else {
+            statusIndicator.classList.add("disconnected");
+            statusIndicator.textContent = "Not Connected";
+          }
+
+          // Format and display details
+          const formattedDetails = JSON.stringify(data, null, 2);
+          statusDetails.textContent = formattedDetails;
+
+          updateLastUpdated();
+          return data;
+        } catch (error) {
+          statusIndicator.className = "status-indicator disconnected";
+          statusIndicator.textContent = "Error";
+          statusDetails.textContent = `Error checking status: ${error.message}`;
+          updateLastUpdated();
+          return null;
+        }
+      }
+
+      async function checkHealth() {
+        try {
+          const response = await fetch("/health");
+          if (!response.ok) {
+            throw new Error(`HTTP error ${response.status}`);
+          }
+
+          const data = await response.json();
+
+          // Show health check results
+          const formattedHealth = JSON.stringify(data, null, 2);
+          statusDetails.textContent = formattedHealth;
+
+          // Update status indicator based on WhatsApp status
+          statusIndicator.className = "status-indicator";
+          if (data.whatsapp.status === "Connected") {
+            statusIndicator.classList.add("connected");
+            statusIndicator.textContent = "Connected";
+            qrPanel.style.display = "none";
+          } else if (data.whatsapp.status === "Authenticated but not ready") {
+            statusIndicator.classList.add("initializing");
+            statusIndicator.textContent = "Authenticating";
+            qrPanel.style.display = "none";
+          } else if (data.whatsapp.needsAuthentication) {
+            statusIndicator.classList.add("disconnected");
+            statusIndicator.textContent = "Needs Authentication";
+            checkForQrCode();
+          } else {
+            statusIndicator.classList.add("initializing");
+            statusIndicator.textContent = "Initializing";
+            qrPanel.style.display = "none";
+          }
+
+          updateLastUpdated();
+          return data;
+        } catch (error) {
+          statusIndicator.className = "status-indicator disconnected";
+          statusIndicator.textContent = "Error";
+          statusDetails.textContent = `Error checking health: ${error.message}`;
+          updateLastUpdated();
+          return null;
+        }
+      }
+
+      async function checkForQrCode() {
+        // This function would check for the QR code, but since we don't have direct
+        // access to the QR code in this client-side script, we simply show a message
+        qrPanel.style.display = "block";
+        qrContainer.innerHTML = `
+        <p>QR code needed for authentication!</p>
+        <p>Check the server logs for the QR code text.</p>
+        <p>You can use an online QR code generator to create a scannable code.</p>
+      `;
+      }
+
+      // Event handlers
+      refreshButton.addEventListener("click", checkStatus);
+      checkHealthButton.addEventListener("click", checkHealth);
+
+      // Auto-refresh
+      function startAutoRefresh() {
+        stopAutoRefresh();
+        autoRefreshInterval = setInterval(async () => {
+          // Alternate between status and health checks
+          const healthCheck = Math.random() > 0.5;
+          if (healthCheck) {
+            await checkHealth();
+          } else {
+            await checkStatus();
+          }
+        }, AUTO_REFRESH_SECONDS * 1000);
+      }
+
+      function stopAutoRefresh() {
+        if (autoRefreshInterval) {
+          clearInterval(autoRefreshInterval);
+          autoRefreshInterval = null;
+        }
+      }
+
+      // Initialize
+      async function initialize() {
+        // Initial status check
+        await checkStatus();
+
+        // Then check health
+        await checkHealth();
+
+        // Start auto-refresh
+        startAutoRefresh();
+      }
+
+      // Start everything
+      initialize();
+    </script>
+  </body>
+</html>

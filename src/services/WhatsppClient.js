@@ -12,6 +12,9 @@ let isInitializing = false;
 let initRetries = 0;
 const MAX_RETRIES = 3;
 
+// Expose initialization state globally for other modules to check
+global.isInitializing = false;
+
 // Memory optimization for very small instances (512MB)
 const ULTRA_LOW_MEMORY = true;
 
@@ -235,8 +238,61 @@ whatsappClient.on("authenticated", () => {
   readyTimeout = setTimeout(checkReadyState, 120000);
 });
 
+// Handle browser/page closures and crashes
+const setupBrowserMonitoring = () => {
+  try {
+    if (whatsappClient.pupBrowser) {
+      whatsappClient.pupBrowser.on("disconnected", () => {
+        debugLog("Browser disconnected unexpectedly");
+        isClientReady = false;
+        if (!isInitializing) {
+          debugLog("Triggering reconnection due to browser disconnect");
+          setTimeout(
+            () =>
+              initialize().catch((err) => {
+                debugLog(
+                  `Failed to reinitialize after browser disconnect: ${err.message}`
+                );
+              }),
+            5000
+          );
+        }
+      });
+    }
+
+    if (whatsappClient.pupPage) {
+      whatsappClient.pupPage.on("close", () => {
+        debugLog("Page closed unexpectedly");
+        isClientReady = false;
+        if (!isInitializing) {
+          debugLog("Triggering reconnection due to page close");
+          setTimeout(
+            () =>
+              initialize().catch((err) => {
+                debugLog(
+                  `Failed to reinitialize after page close: ${err.message}`
+                );
+              }),
+            5000
+          );
+        }
+      });
+
+      whatsappClient.pupPage.on("error", (err) => {
+        debugLog(`Page error: ${err.message}`);
+        isClientReady = false;
+      });
+    }
+  } catch (e) {
+    debugLog(`Error setting up browser monitoring: ${e.message}`);
+  }
+};
+
 whatsappClient.on("ready", () => {
   debugLog("WhatsApp client is ready!");
+
+  // Setup monitoring for browser/page events
+  setupBrowserMonitoring();
 
   // Clear ready timeout
   if (readyTimeout) {
@@ -319,6 +375,8 @@ const initialize = async () => {
   }
 
   isInitializing = true;
+  global.isInitializing = true; // Set global flag
+
   debugLog("Starting WhatsApp client initialization...");
 
   // Check if we've exceeded max retries
@@ -327,6 +385,7 @@ const initialize = async () => {
       `Maximum retries (${MAX_RETRIES}) exceeded. Waiting for manual restart.`
     );
     isInitializing = false;
+    global.isInitializing = false; // Clear global flag
     return false;
   }
 
@@ -389,6 +448,7 @@ const initialize = async () => {
 
     debugLog("WhatsApp client initialization completed successfully");
     isInitializing = false;
+    global.isInitializing = false; // Clear global flag
     initRetries = 0; // Reset retry counter on success
     return true;
   } catch (error) {
@@ -412,6 +472,7 @@ const initialize = async () => {
 
       setTimeout(async () => {
         isInitializing = false;
+        global.isInitializing = false; // Clear global flag
         await initialize();
       }, retryDelay);
     } else if (error.message.includes("timeout")) {
@@ -425,16 +486,105 @@ const initialize = async () => {
       // Still try to recover
       setTimeout(async () => {
         isInitializing = false;
+        global.isInitializing = false; // Clear global flag
         await initialize();
       }, 15000); // Longer delay for timeout errors
     }
 
     isInitializing = false;
+    global.isInitializing = false; // Clear global flag
+    return false;
+  }
+};
+
+// Add a method to check if client is fully ready
+whatsappClient.isReady = function () {
+  try {
+    return !!(this.info && this.pupPage && this.pupBrowser && isClientReady);
+  } catch (e) {
+    debugLog(`Error checking ready state: ${e.message}`);
     return false;
   }
 };
 
 // Replace the default initialize method with our custom one
 whatsappClient.initialize = initialize;
+
+// Function to safely handle errors with connection and try to reconnect
+whatsappClient.tryReconnect = function (errorMessage) {
+  debugLog(`Connection issue detected: ${errorMessage}`);
+
+  // Only attempt reconnection if not already initializing
+  if (!isInitializing) {
+    isClientReady = false;
+
+    // If we have a browser, try to close it first
+    if (this.pupBrowser) {
+      try {
+        debugLog("Closing browser before reconnection attempt");
+        this.pupBrowser.close().catch((e) => {
+          debugLog(`Error closing browser: ${e.message}`);
+        });
+      } catch (err) {
+        debugLog(`Error during browser closure: ${err.message}`);
+      }
+    }
+
+    // Wait a bit then initialize again
+    debugLog("Scheduling reconnection attempt in 10 seconds");
+    setTimeout(() => {
+      initialize().catch((err) => {
+        debugLog(`Failed to reconnect: ${err.message}`);
+      });
+    }, 10000);
+  } else {
+    debugLog("Reconnection already in progress, skipping new attempt");
+  }
+};
+
+// Add a method to safely check connection state
+whatsappClient.checkConnection = function () {
+  try {
+    const isConnected =
+      this.info && this.pupPage && this.pupBrowser && isClientReady;
+    if (!isConnected && !isInitializing) {
+      debugLog("Connection check failed, triggering reconnection");
+      this.tryReconnect("Connection check failed");
+    }
+    return isConnected;
+  } catch (e) {
+    debugLog(`Error during connection check: ${e.message}`);
+    this.tryReconnect(e.message);
+    return false;
+  }
+};
+
+// Add error handling to sendMessage method by monkey patching it
+const originalSendMessage = whatsappClient.sendMessage;
+whatsappClient.sendMessage = async function (chatId, content, options) {
+  try {
+    // Check connection first
+    if (!this.checkConnection()) {
+      throw new Error("Client is not connected. Cannot send message.");
+    }
+
+    // Call the original method
+    return await originalSendMessage.call(this, chatId, content, options);
+  } catch (error) {
+    debugLog(`Error in sendMessage: ${error.message}`);
+
+    // Check for connection-related errors
+    if (
+      error.message.includes("page") ||
+      error.message.includes("browser") ||
+      error.message.includes("not connected") ||
+      error.message.includes("not ready")
+    ) {
+      this.tryReconnect(error.message);
+    }
+
+    throw error;
+  }
+};
 
 module.exports = whatsappClient;
