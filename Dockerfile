@@ -4,8 +4,8 @@ FROM node:16-slim
 ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true
 ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/google-chrome-stable
 ENV NODE_ENV=production
-# Optimize Node.js memory settings
-ENV NODE_OPTIONS="--max_old_space_size=384 --optimize-for-size --gc-interval=100 --max-http-header-size=10240"
+# Simplify Node.js memory settings to only include the memory limit
+ENV NODE_OPTIONS="--max_old_space_size=384"
 # Add extra Chrome flags
 ENV CHROME_EXTRA_FLAGS="--disable-dev-shm-usage --disable-software-rasterizer --no-sandbox --disable-setuid-sandbox"
 
@@ -46,10 +46,10 @@ RUN echo "Verifying Chrome installation..." && \
 RUN mkdir -p /var/log && touch /var/log/puppeteer.log && chmod 777 /var/log/puppeteer.log
 
 # Optimize for Render.com environment - clean up unnecessary files
-RUN find /app/node_modules -name "*.md" -type f -delete && \
-    find /app/node_modules -name "*.map" -type f -delete && \
-    find /app/node_modules -name "LICENSE" -type f -delete && \
-    find /app/node_modules -name "README*" -type f -delete
+RUN find /app/node_modules -name "*.md" -type f -delete || true && \
+    find /app/node_modules -name "*.map" -type f -delete || true && \
+    find /app/node_modules -name "LICENSE" -type f -delete || true && \
+    find /app/node_modules -name "README*" -type f -delete || true
 
 # Expose the port
 EXPOSE 3000
@@ -80,7 +80,7 @@ rm -rf /tmp/.org.chromium.Chromium* || true\n\
 done) &\n\
 \n\
 # Start the application with proper failure handling\n\
-node --expose-gc src/index.js 2>&1 | tee -a /var/log/app.log\n\
+node src/index.js 2>&1 | tee -a /var/log/app.log\n\
 \n\
 # Check exit status\n\
 EXIT_CODE=$?\n\
