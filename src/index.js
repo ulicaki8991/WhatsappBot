@@ -3,13 +3,31 @@ const path = require("path");
 const messageRouter = require("./routes/messageRouter");
 const whatsappClient = require("./services/WhatsppClient");
 
+console.log("===========================================");
 console.log("Starting WhatsApp Bot service...");
+console.log(`Environment: ${process.env.NODE_ENV || "development"}`);
+console.log(`Time: ${new Date().toISOString()}`);
+console.log("===========================================");
+
+// Add unhandled rejection handler
+process.on("unhandledRejection", (reason, promise) => {
+  console.error("Unhandled Rejection at:", promise, "reason:", reason);
+});
+
+// Add uncaught exception handler
+process.on("uncaughtException", (error) => {
+  console.error("Uncaught Exception:", error);
+});
 
 // Initialize WhatsApp client
 whatsappClient
   .initialize()
-  .then(() => {
-    console.log("WhatsApp client initialized successfully");
+  .then((success) => {
+    if (success) {
+      console.log("WhatsApp client initialized successfully");
+    } else {
+      console.warn("WhatsApp client initialization completed with issues");
+    }
   })
   .catch((err) => {
     console.error("Error initializing WhatsApp client:", err);
@@ -21,9 +39,23 @@ const app = express();
 app.use(express.json());
 app.use(express.static(path.join(__dirname, "public")));
 
-// Add basic logging middleware
+// Add detailed logging middleware
 app.use((req, res, next) => {
-  console.log(`${new Date().toISOString()} - ${req.method} ${req.originalUrl}`);
+  const start = Date.now();
+  console.log(
+    `[${new Date().toISOString()}] ${req.method} ${req.originalUrl} - Started`
+  );
+
+  // Add response logging
+  res.on("finish", () => {
+    const duration = Date.now() - start;
+    console.log(
+      `[${new Date().toISOString()}] ${req.method} ${req.originalUrl} - ${
+        res.statusCode
+      } (${duration}ms)`
+    );
+  });
+
   next();
 });
 
@@ -38,13 +70,26 @@ app.get("/", (req, res) => {
   res.sendFile(path.join(__dirname, "public", "index.html"));
 });
 
-// Health check endpoint for Render
+// Enhanced health check endpoint for Render
 app.get("/health", (req, res) => {
-  const clientStatus = whatsappClient.info ? "Connected" : "Initializing";
+  const clientInfo = whatsappClient.info;
+  const clientStatus = clientInfo ? "Connected" : "Initializing";
+
+  // Check if we need authentication
+  const needsAuth = !clientInfo && process.uptime() > 60; // If not connected after 60 seconds
+
   res.status(200).json({
     status: "OK",
-    whatsapp: clientStatus,
+    uptime: process.uptime(),
+    whatsapp: {
+      status: clientStatus,
+      connectedAt: clientInfo
+        ? new Date(clientInfo.lastConnect).toISOString()
+        : null,
+      needsAuthentication: needsAuth,
+    },
     timestamp: new Date().toISOString(),
+    environment: process.env.NODE_ENV || "development",
   });
 });
 
