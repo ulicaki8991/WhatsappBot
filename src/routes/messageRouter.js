@@ -62,6 +62,24 @@ router.post("/send-price-notification", async (req, res) => {
       });
     }
 
+    // Check if WhatsApp client is ready before proceeding
+    const clientInfo = whatsappClient.info;
+    const isReady =
+      whatsappClient.pupPage && whatsappClient.pupBrowser && clientInfo;
+
+    if (!isReady) {
+      console.error("WhatsApp client is not ready. Cannot send message.");
+      return res.status(503).json({
+        success: false,
+        message: "WhatsApp client is not fully connected. Try again later.",
+        details: {
+          clientInfo: !!clientInfo,
+          authenticated: whatsappClient.authStrategy?.isAuthenticated,
+          browserReady: !!(whatsappClient.pupPage && whatsappClient.pupBrowser),
+        },
+      });
+    }
+
     // Format the number (ensure it has the correct format with country code)
     const formattedNumber = number.includes("@c.us")
       ? number
@@ -79,8 +97,17 @@ router.post("/send-price-notification", async (req, res) => {
       message = messageTemplates.priceNotification(price, currency);
     }
 
+    console.log(
+      `Attempting to send message to ${formattedNumber}: ${message.substring(
+        0,
+        30
+      )}...`
+    );
+
     // Send the message
     const response = await whatsappClient.sendMessage(formattedNumber, message);
+
+    console.log(`Message sent successfully with ID: ${response.id}`);
 
     res.status(200).json({
       success: true,
@@ -98,14 +125,32 @@ router.post("/send-price-notification", async (req, res) => {
       success: false,
       message: "Failed to send price notification",
       error: error.message,
+      stack: process.env.NODE_ENV === "development" ? error.stack : undefined,
     });
   }
 });
 
 // Get connection status
 router.get("/status", (req, res) => {
-  const status = whatsappClient.info ? "Connected" : "Not connected";
-  res.status(200).json({ status });
+  // More comprehensive status check
+  const clientInfo = whatsappClient.info;
+  const isReady =
+    whatsappClient.pupPage && whatsappClient.pupBrowser && clientInfo;
+
+  const status = isReady ? "Connected" : "Not connected";
+
+  // Include more detailed status information to help with debugging
+  res.status(200).json({
+    status,
+    details: {
+      clientInfo: !!clientInfo,
+      authenticated: whatsappClient.authStrategy?.isAuthenticated,
+      lastConnect: clientInfo
+        ? new Date(clientInfo.lastConnect).toISOString()
+        : null,
+      serverUptime: process.uptime(),
+    },
+  });
 });
 
 module.exports = router;

@@ -2,6 +2,7 @@ const { Client, LocalAuth } = require("whatsapp-web.js");
 const qrcode = require("qrcode-terminal");
 const fs = require("fs");
 const puppeteer = require("puppeteer");
+const path = require("path");
 
 // Determine if we're in production (Render.com) or development
 const isProduction = process.env.NODE_ENV === "production";
@@ -205,8 +206,45 @@ whatsappClient.on("loading_screen", (percent, message) => {
   }
 });
 
+// Add a ready timeout watchdog - add after the authenticated event
+let readyTimeout = null;
+let isClientReady = false;
+
+// Function to check if client is in a "stuck" authenticated state
+const checkReadyState = () => {
+  if (!isClientReady && whatsappClient.authStrategy?.isAuthenticated) {
+    debugLog("WARNING: Client is authenticated but not ready after timeout");
+    // Force reconnection
+    if (whatsappClient.pupBrowser) {
+      debugLog("Forcing browser closure to trigger reconnection");
+      try {
+        whatsappClient.pupBrowser
+          .close()
+          .catch((e) => debugLog(`Error closing browser: ${e.message}`));
+      } catch (err) {
+        debugLog(`Error during forced browser closure: ${err.message}`);
+      }
+    }
+  }
+};
+
+whatsappClient.on("authenticated", () => {
+  debugLog("WhatsApp client authenticated successfully");
+
+  // Set a timeout to check if we reach "ready" state within 2 minutes
+  readyTimeout = setTimeout(checkReadyState, 120000);
+});
+
 whatsappClient.on("ready", () => {
   debugLog("WhatsApp client is ready!");
+
+  // Clear ready timeout
+  if (readyTimeout) {
+    clearTimeout(readyTimeout);
+    readyTimeout = null;
+  }
+
+  isClientReady = true;
 
   // Reset retry counter on successful connection
   initRetries = 0;
@@ -221,10 +259,6 @@ whatsappClient.on("ready", () => {
       debugLog(`Error clearing QR file: ${error.message}`);
     }
   }
-});
-
-whatsappClient.on("authenticated", () => {
-  debugLog("WhatsApp client authenticated successfully");
 });
 
 whatsappClient.on("auth_failure", (msg) => {
@@ -295,6 +329,29 @@ const initialize = async () => {
     isInitializing = false;
     return false;
   }
+
+  // Check for restart trigger file
+  const restartTriggerFile = path.join("./auth_data", "restart_trigger");
+  if (fs.existsSync(restartTriggerFile)) {
+    debugLog("Restart trigger file detected, cleaning auth data");
+    try {
+      // Clean auth data directory except for the trigger file
+      fs.readdirSync("./auth_data").forEach((file) => {
+        if (file !== "restart_trigger") {
+          const filePath = path.join("./auth_data", file);
+          fs.unlinkSync(filePath);
+        }
+      });
+      // Now remove the trigger file
+      fs.unlinkSync(restartTriggerFile);
+      debugLog("Auth data cleaned for fresh restart");
+    } catch (error) {
+      debugLog(`Error cleaning auth data: ${error.message}`);
+    }
+  }
+
+  // Reset ready state flag
+  isClientReady = false;
 
   initRetries++;
 

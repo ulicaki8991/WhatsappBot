@@ -73,10 +73,22 @@ app.get("/", (req, res) => {
 // Enhanced health check endpoint for Render
 app.get("/health", (req, res) => {
   const clientInfo = whatsappClient.info;
-  const clientStatus = clientInfo ? "Connected" : "Initializing";
+  const isAuthenticated = whatsappClient.authStrategy?.isAuthenticated;
+  const isReady =
+    clientInfo && whatsappClient.pupPage && whatsappClient.pupBrowser;
+
+  let clientStatus = "Initializing";
+
+  if (isReady) {
+    clientStatus = "Connected";
+  } else if (isAuthenticated) {
+    clientStatus = "Authenticated but not ready";
+  } else if (!clientInfo && process.uptime() > 60) {
+    clientStatus = "Not authenticated";
+  }
 
   // Check if we need authentication
-  const needsAuth = !clientInfo && process.uptime() > 60; // If not connected after 60 seconds
+  const needsAuth = !isAuthenticated && process.uptime() > 60;
 
   res.status(200).json({
     status: "OK",
@@ -87,6 +99,8 @@ app.get("/health", (req, res) => {
         ? new Date(clientInfo.lastConnect).toISOString()
         : null,
       needsAuthentication: needsAuth,
+      isAuthenticated: isAuthenticated,
+      isFullyReady: isReady,
     },
     timestamp: new Date().toISOString(),
     environment: process.env.NODE_ENV || "development",
