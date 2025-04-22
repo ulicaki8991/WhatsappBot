@@ -1,101 +1,77 @@
-FROM node:16-slim
+FROM node:16
 
-# Set environment variables for better Chrome behavior
-ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true
-ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/google-chrome-stable
-ENV NODE_ENV=production
-# Simplify Node.js memory settings to only include the memory limit
-ENV NODE_OPTIONS="--max_old_space_size=384"
-# Add extra Chrome flags
-ENV CHROME_EXTRA_FLAGS="--disable-dev-shm-usage --disable-software-rasterizer --no-sandbox --disable-setuid-sandbox"
+# Install dependencies for Puppeteer
+RUN apt-get update && apt-get install -y \
+    gconf-service \
+    libasound2 \
+    libatk1.0-0 \
+    libatk-bridge2.0-0 \
+    libc6 \
+    libcairo2 \
+    libcups2 \
+    libdbus-1-3 \
+    libexpat1 \
+    libfontconfig1 \
+    libgcc1 \
+    libgconf-2-4 \
+    libgdk-pixbuf2.0-0 \
+    libglib2.0-0 \
+    libgtk-3-0 \
+    libnspr4 \
+    libpango-1.0-0 \
+    libpangocairo-1.0-0 \
+    libstdc++6 \
+    libx11-6 \
+    libx11-xcb1 \
+    libxcb1 \
+    libxcomposite1 \
+    libxcursor1 \
+    libxdamage1 \
+    libxext6 \
+    libxfixes3 \
+    libxi6 \
+    libxrandr2 \
+    libxrender1 \
+    libxss1 \
+    libxtst6 \
+    ca-certificates \
+    fonts-liberation \
+    fonts-noto-color-emoji \
+    libappindicator1 \
+    libnss3 \
+    lsb-release \
+    xdg-utils \
+    wget \
+    xvfb \
+    && rm -rf /var/lib/apt/lists/*
 
-# Install latest Chrome and dependencies for Puppeteer with more debugging tools
-RUN apt-get update \
-    && apt-get install -y wget gnupg procps curl htop vim \
-    && wget -q -O - https://dl-ssl.google.com/linux/linux_signing_key.pub | apt-key add - \
-    && sh -c 'echo "deb [arch=amd64] http://dl.google.com/linux/chrome/deb/ stable main" >> /etc/apt/sources.list.d/google.list' \
+# Install latest Google Chrome
+RUN wget -q -O - https://dl-ssl.google.com/linux/linux_signing_key.pub | apt-key add - \
+    && echo "deb [arch=amd64] http://dl.google.com/linux/chrome/deb/ stable main" >> /etc/apt/sources.list.d/google.list \
     && apt-get update \
-    && apt-get install -y google-chrome-stable fonts-noto-color-emoji fonts-freefont-ttf libxss1 \
-      --no-install-recommends \
-    && apt-get clean \
-    && rm -rf /var/lib/apt/lists/* \
-    && mkdir -p /tmp/logs \
-    && chmod 777 /tmp/logs
+    && apt-get install -y google-chrome-stable \
+    && rm -rf /var/lib/apt/lists/*
 
-# Create and ensure proper permissions for auth data directory
-RUN mkdir -p /app/auth_data && chmod -R 777 /app/auth_data
-
-# Set working directory
+# Set up working directory
 WORKDIR /app
 
-# Copy package.json and package-lock.json
+# Copy package files
 COPY package*.json ./
 
-# Install app dependencies with production flag
-RUN npm install --production --no-optional --no-audit
+# Install dependencies
+RUN npm install
 
-# Bundle app source
+# Copy project files
 COPY . .
 
-# Verify Chrome installation
-RUN echo "Verifying Chrome installation..." && \
-    google-chrome-stable --version && \
-    echo "Chrome installation verified."
+# Make sure auth_data directory exists
+RUN mkdir -p auth_data
 
-# Create directory for logs
-RUN mkdir -p /var/log && touch /var/log/puppeteer.log && chmod 777 /var/log/puppeteer.log
-
-# Optimize for Render.com environment - clean up unnecessary files
-RUN find /app/node_modules -name "*.md" -type f -delete || true && \
-    find /app/node_modules -name "*.map" -type f -delete || true && \
-    find /app/node_modules -name "LICENSE" -type f -delete || true && \
-    find /app/node_modules -name "README*" -type f -delete || true
+# Set environment to production
+ENV NODE_ENV=production
 
 # Expose the port
 EXPOSE 3000
 
-# Create an improved startup script with better error handling and memory optimization
-RUN echo '#!/bin/bash\n\
-echo "Starting WhatsApp Bot service at $(date)"\n\
-echo "System information:"\n\
-free -m\n\
-echo "Node version: $(node -v)"\n\
-echo "Chrome version: $(google-chrome-stable --version)"\n\
-\n\
-# Clean up any stray Chrome processes before starting\n\
-pkill -9 chrome || true\n\
-\n\
-# Clean up any cache files\n\
-rm -rf /tmp/.org.chromium.Chromium* || true\n\
-\n\
-# Create a memory monitor in background\n\
-(while true; do\n\
-  echo "[$(date)] Memory usage (MB):" >> /tmp/memory_monitor.log\n\
-  free -m | grep "Mem:" >> /tmp/memory_monitor.log\n\
-  echo "[$(date)] Node memory:" >> /tmp/memory_monitor.log\n\
-  ps -o pid,rss,command | grep "node" | grep -v grep >> /tmp/memory_monitor.log\n\
-  echo "[$(date)] Chrome memory:" >> /tmp/memory_monitor.log\n\
-  ps -o pid,rss,command | grep "chrome" | grep -v grep >> /tmp/memory_monitor.log\n\
-  sleep 30\n\
-done) &\n\
-\n\
-# Start the application with proper failure handling\n\
-node src/index.js 2>&1 | tee -a /var/log/app.log\n\
-\n\
-# Check exit status\n\
-EXIT_CODE=$?\n\
-if [ $EXIT_CODE -ne 0 ]; then\n\
-  echo "Application crashed with exit code $EXIT_CODE"\n\
-  echo "Last 50 lines of logs:"\n\
-  tail -n 50 /var/log/app.log\n\
-  echo "Memory at time of crash:"\n\
-  free -m\n\
-  echo "Last Chrome processes:"\n\
-  ps aux | grep chrome\n\
-  echo "Check /tmp/whatsapp-debug.log for more information"\n\
-fi\n\
-' > /app/start.sh \
-    && chmod +x /app/start.sh
-
 # Start the app
-CMD ["/app/start.sh"] 
+CMD ["node", "src/simple-whatsapp.js"] 

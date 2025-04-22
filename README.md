@@ -1,212 +1,153 @@
-# WhatsApp Bot
+# Simple WhatsApp Connector
 
-A simple WhatsApp bot that sends automated price notifications using Express.js and whatsapp-web.js.
+A minimalist WhatsApp API connector that provides a single endpoint to send messages.
 
-## Prerequisites
+## Features
 
-- Node.js v12.x or higher
-- Google Chrome browser installed
-- A WhatsApp account
+- Simple, single-purpose API
+- Minimal dependencies
+- Auto-reconnection on disconnection
+- QR code authentication
+- Single endpoint to send messages
 
 ## Installation
 
 1. Clone this repository
 2. Install dependencies:
+   ```
+   npm install
+   ```
+3. Start the server:
+   ```
+   npm start
+   ```
 
-```bash
-npm install
-```
+## Authentication
 
-## Running the Bot
+When you first start the application, you'll need to authenticate by scanning the QR code that appears in the console. After scanning, the authentication will be saved in the `auth_data` directory for future use.
 
-Start the bot with:
+## API Endpoints
 
-```bash
-npm start
-```
+### Send a Message
 
-When you run the bot for the first time:
-1. A Chrome browser window will open
-2. A QR code will be displayed in your terminal
-3. Scan this QR code with your WhatsApp mobile app:
-   - Open WhatsApp on your phone
-   - Tap Menu or Settings
-   - Select WhatsApp Web
-   - Point your phone camera at the QR code
+**Endpoint:** `POST /send-message`
 
-## Using the Price Notification System
-
-### Web Interface
-
-After starting the server, open a browser and go to:
-```
-http://localhost:3000
-```
-
-The web interface allows you to:
-- Enter a phone number (including country code)
-- Set the price
-- Select a message template
-- Send price notifications
-
-### API Endpoints
-
-#### Send a Price Notification
-
-```
-POST /send-price-notification
-```
-
-Request body:
+**Request Body:**
 ```json
 {
-  "number": "14155238886",
-  "price": 99.99,
-  "currency": "$",
-  "templateType": "priceNotification"
+  "number": "1234567890",
+  "message": "Hello, this is a test message!"
 }
 ```
 
-Parameters:
-- `number`: Phone number with country code (required)
-- `price`: Numeric price value (required)
-- `currency`: Currency symbol (optional, default: "$")
-- `templateType`: Type of message template (optional, options: "priceNotification", "paymentConfirmation", "custom")
-- `customTemplate`: Custom message template if templateType is "custom", use {price} as placeholder.
-
-Example custom template:
+**Response:**
 ```json
 {
-  "number": "14155238886", 
-  "price": 99.99,
-  "templateType": "custom",
-  "customTemplate": "Your order is ready! Please pay {price} upon delivery."
+  "success": true,
+  "message": "Message sent successfully",
+  "messageId": "message-id-from-whatsapp"
 }
 ```
 
-#### Check Connection Status
+### Check Health
 
-```
-GET /status
-```
+**Endpoint:** `GET /health`
 
-Response:
+**Response:**
 ```json
 {
-  "status": "Connected"
+  "status": "OK",
+  "whatsappConnected": true,
+  "uptime": 123.45,
+  "environment": "production",
+  "timestamp": "2023-05-01T12:00:00.000Z",
+  "qrCodeAvailable": false
 }
 ```
 
-## Integrating with Other Services
+### Force Reconnection
 
-You can integrate this WhatsApp price notification system with your existing services:
+If the application gets stuck, you can force a reconnection:
 
-### Example in Node.js
+**Endpoint:** `POST /force-reconnect`
 
-```javascript
-const axios = require('axios');
-
-async function sendPriceNotification(phoneNumber, price) {
-  try {
-    const response = await axios.post('http://localhost:3000/send-price-notification', {
-      number: phoneNumber,
-      price: price
-    });
-    console.log('Notification sent:', response.data);
-    return response.data;
-  } catch (error) {
-    console.error('Error sending notification:', error.response?.data || error.message);
-    throw error;
-  }
+**Response:**
+```json
+{
+  "success": true,
+  "message": "Reconnection process started. Check logs for QR code."
 }
-
-// Usage
-sendPriceNotification('14155238886', 99.99);
 ```
 
-### Example in Python
+## Deploying to Render.com
 
-```python
-import requests
+This application is specially configured to work on Render.com:
 
-def send_price_notification(phone_number, price):
-    try:
-        response = requests.post(
-            'http://localhost:3000/send-price-notification',
-            json={
-                'number': phone_number,
-                'price': price
-            }
-        )
-        response.raise_for_status()
-        return response.json()
-    except requests.exceptions.RequestException as e:
-        print(f"Error sending notification: {e}")
-        raise
+1. **Create a new Web Service**:
+   - Sign up for a Render.com account if you don't have one
+   - Click "New" and select "Web Service"
+   - Connect your GitHub repository
 
-# Usage
-send_price_notification('14155238886', 99.99)
-```
+2. **Configure the service**:
+   - **Environment**: Select "Docker"
+   - **Name**: Choose a name (e.g., "whatsapp-connector")
+   - **Branch**: Select your branch (e.g., "main")
+   - **Plan**: Choose at least a "Standard" plan (not the free tier as it has memory limitations)
 
-## Deployment to Render.com
+3. **Set up persistent storage**:
+   - In your service settings, go to "Disks" 
+   - Add a new disk:
+     - Name: "whatsapp-auth"
+     - Mount Path: "/app/auth_data"
+     - Size: 1 GB (minimum)
 
-This application can be deployed to Render.com, but it requires special setup due to the need for a headless Chrome instance.
+4. **After deployment**:
+   - Authenticate your WhatsApp account by accessing the QR code
+   - The QR code will be printed in the Render logs
+   - You can also access it at the path `/app/auth_data/latest-qr.txt` via the Render shell
 
-### Option 1: Using Docker (Recommended)
+### Using the render.yaml
 
-1. Create a free account on [Render.com](https://render.com)
-2. Click "New" and select "Web Service"
-3. Connect your GitHub repository
-4. Configure the service:
-   - Choose "Docker" as the Environment
-   - Set the name to "whatsapp-price-bot" or your preference
-   - Select the branch to deploy
-   - Set "Instance Type" to at least "Standard" (not "Free" as it needs more memory)
-   - Click "Create Web Service"
+Alternatively, if you're using the Blueprint feature:
 
-### Option 2: Using the render.yaml Configuration
+1. Push your code with the `render.yaml` file to a GitHub repository
+2. In Render.com, click "New" → "Blueprint"
+3. Connect to your repository
+4. Render will automatically set up the service with the correct configuration
 
-1. Push the code with the `render.yaml` file to your repository
-2. In Render.com, click "New" and select "Blueprint"
-3. Connect your repository
-4. Render will detect and use the configuration in the render.yaml file
+## Accessing the QR Code on Render.com
 
-### Scanning the QR Code on Render
+When deploying to Render.com, you'll need to scan a QR code to authenticate:
 
-When deploying on Render, you'll need to scan a QR code to authenticate your WhatsApp account. Since there's no visual interface:
+1. After deploying, go to your service's "Logs" tab in the Render dashboard
+2. Look for a section with "=== SCAN THIS QR CODE WITH YOUR WHATSAPP ===" 
+3. Copy the QR code data (the text between the markers)
+4. Use an online QR code generator (like https://www.the-qrcode-generator.com/) to generate a QR code from this text
+5. Scan the generated QR code with your WhatsApp app
 
-1. After deploying, check the logs in the Render dashboard
-2. Look for a section in the logs that contains the QR code data
-3. Use an online QR code generator like [QR Code Generator](https://www.the-qrcode-generator.com/) and paste the QR code data
-4. Scan the generated QR code with your WhatsApp mobile app
-
-### Persistence on Render
-
-To maintain your WhatsApp session between deployments:
-
-1. Go to your web service settings in Render
-2. Under "Disks", add a new disk:
-   - Mount path: `/app/auth_data`
-   - Name: `whatsapp-auth`
-   - Size: 1 GB (minimum)
-
-This will preserve your WhatsApp authentication between deployments.
+Alternatively, you can use the Shell to view the QR code:
+1. Go to your service's "Shell" tab
+2. Run: `cat auth_data/latest-qr.txt`
+3. Copy this text and use an online QR code generator
 
 ## Troubleshooting
 
-If you encounter timeout errors:
+If the application fails to connect:
 
-- Make sure Google Chrome is installed on your system
-- Ensure you have a stable internet connection
-- Try increasing the timeout value in `src/services/WhatsppClient.js`
-- Check that WhatsApp is properly registered on your phone
+1. Use the `/force-reconnect` endpoint to clear authentication data and restart
+2. Check the logs for error messages
+3. If running on Render.com, make sure you're using at least the "Standard" plan, not the free tier
+4. Ensure the authentication data is being saved to a persistent disk
 
-### Render-Specific Troubleshooting
+## Environment Variables
 
-- If you see "Error: Failed to launch the browser process", check that your service plan has sufficient memory
-- If WhatsApp keeps disconnecting, ensure you've set up the disk for persistence
-- The free tier may not have enough resources to run the bot. Consider upgrading to a paid plan.
+- `PORT`: The port the server will run on (default: 3000)
+- `NODE_ENV`: Set to "production" when deploying to Render.com
 
-## License
+## Usage Example with cURL
 
-ISC 
+```bash
+curl -X POST https://your-render-url.onrender.com/send-message \
+  -H "Content-Type: application/json" \
+  -d '{"number": "1234567890", "message": "Hello from WhatsApp Connector!"}'
+``` 

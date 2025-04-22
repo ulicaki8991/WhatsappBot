@@ -1,13 +1,17 @@
 services:
   - type: web
-    name: whatsapp-price-bot
-    env: node
-    plan: standard
-    buildCommand: npm install
-    startCommand: node src/index.js
+    name: whatsapp-connector
+    env: docker
+    region: ohio
+    plan: standard # You need at least the standard plan for this to work reliably
+    branch: main
+    healthCheckPath: /health
+    dockerfilePath: ./Dockerfile
+    dockerCommand: node src/simple-whatsapp.js
     envVars:
-      - key: NODE_VERSION
-        value: 16.x
-    scaling:
-      minInstances: 1
-      maxInstances: 1 
+      - key: NODE_ENV
+        value: production
+    disk:
+      name: whatsapp-auth
+      mountPath: /app/auth_data
+      sizeGB: 1 
