@@ -71,16 +71,27 @@ app.post("/force-reconnect", async (req, res) => {
   console.log("Manual reconnection requested");
 
   try {
+    // Make sure the auth_data directory exists
+    const authDir = "./auth_data";
+    if (!fs.existsSync(authDir)) {
+      fs.mkdirSync(authDir, { recursive: true });
+      console.log("Created auth_data directory");
+    }
+
+    console.log("Starting forced reconnection process");
     // Use the forceCleanAuth function to properly clean up and reconnect
     const result = await whatsappClient.forceCleanAuth();
+    console.log("Forced reconnection completed with result:", result);
 
     res.status(200).json({
       success: true,
       message:
-        "Reconnection process triggered. Check logs for QR code if needed.",
+        "Reconnection process triggered. A QR code should appear in the logs within 30-60 seconds.",
       result: result
         ? "Initialization started successfully"
         : "Initialization may have failed",
+      instructions:
+        "Check the server logs for a QR code to scan with your WhatsApp app.",
     });
   } catch (error) {
     console.error("Error during forced reconnection:", error);
@@ -88,6 +99,7 @@ app.post("/force-reconnect", async (req, res) => {
       success: false,
       message: "Error during reconnection process",
       error: error.message,
+      stack: process.env.NODE_ENV === "development" ? error.stack : undefined,
     });
   }
 });

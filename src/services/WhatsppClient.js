@@ -384,15 +384,58 @@ const initialize = async () => {
     if (fs.existsSync(authPath)) {
       // Look for session data files
       const files = fs.readdirSync(authPath);
+
+      // Check if there's a valid session directory
+      const sessionDir = files.find(
+        (f) => f === "session-whatsapp-bot" || f === "session"
+      );
+
+      if (sessionDir) {
+        // Check if the session directory is empty or has invalid files
+        const sessionPath = path.join(authPath, sessionDir);
+
+        try {
+          if (fs.statSync(sessionPath).isDirectory()) {
+            const sessionFiles = fs.readdirSync(sessionPath);
+
+            // If session directory is empty or has very few files, it might be corrupted
+            if (sessionFiles.length < 2) {
+              debugLog(
+                `Session directory ${sessionDir} appears to be corrupted or empty`
+              );
+              fs.rmdirSync(sessionPath, { recursive: true });
+              debugLog(
+                `Removed potentially corrupted session directory: ${sessionPath}`
+              );
+            } else {
+              debugLog(
+                `Found valid session directory: ${sessionDir} with ${sessionFiles.length} files`
+              );
+            }
+          }
+        } catch (dirErr) {
+          debugLog(`Error checking session directory: ${dirErr.message}`);
+        }
+      }
+
+      // Check for other potentially corrupted files
       if (files.length > 0 && !files.some((f) => f.includes("session"))) {
         debugLog("Possible corrupted auth data found, cleaning...");
         for (const file of files) {
           if (file !== ".gitkeep" && file !== "restart_trigger") {
             try {
-              fs.unlinkSync(path.join(authPath, file));
-              debugLog(`Removed potentially corrupted auth file: ${file}`);
+              const filePath = path.join(authPath, file);
+              const stats = fs.statSync(filePath);
+
+              if (stats.isDirectory()) {
+                fs.rmdirSync(filePath, { recursive: true });
+                debugLog(`Removed directory: ${filePath}`);
+              } else {
+                fs.unlinkSync(filePath);
+                debugLog(`Removed file: ${filePath}`);
+              }
             } catch (e) {
-              debugLog(`Failed to remove file ${file}: ${e.message}`);
+              debugLog(`Failed to remove ${file}: ${e.message}`);
             }
           }
         }
@@ -641,7 +684,23 @@ whatsappClient.forceCleanAuth = async function () {
       const files = fs.readdirSync(authPath);
       for (const file of files) {
         if (file !== ".gitkeep") {
-          fs.unlinkSync(path.join(authPath, file));
+          const filePath = path.join(authPath, file);
+
+          // Check if it's a directory or file and handle accordingly
+          try {
+            const stats = fs.statSync(filePath);
+            if (stats.isDirectory()) {
+              // Recursively remove directory
+              debugLog(`Removing directory: ${filePath}`);
+              fs.rmdirSync(filePath, { recursive: true });
+            } else {
+              // Remove file
+              debugLog(`Removing file: ${filePath}`);
+              fs.unlinkSync(filePath);
+            }
+          } catch (err) {
+            debugLog(`Error removing ${filePath}: ${err.message}`);
+          }
         }
       }
       debugLog("Auth data cleaned");
