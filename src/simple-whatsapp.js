@@ -4,12 +4,36 @@ const qrcode = require("qrcode-terminal");
 const fs = require("fs");
 const path = require("path");
 
-// Check if we're in production (Render.com)
-const isProduction =
-  process.env.NODE_ENV === "production" || process.env.RENDER === "true";
+// Check if we're in production
+const isProduction = process.env.NODE_ENV === "production";
 
-console.log(`Running in ${isProduction ? "PRODUCTION" : "DEVELOPMENT"} mode`);
-console.log(
+// Set up logging
+const logDir = isProduction ? path.join(__dirname, "../logs") : "logs";
+if (!fs.existsSync(logDir)) {
+  try {
+    fs.mkdirSync(logDir, { recursive: true });
+  } catch (error) {
+    console.error(`Error creating log directory: ${error.message}`);
+  }
+}
+
+const log = (message) => {
+  const timestamp = new Date().toISOString();
+  const logMessage = `[${timestamp}] ${message}`;
+  console.log(logMessage);
+
+  // Also write to a file for persistent logging
+  if (isProduction) {
+    try {
+      fs.appendFileSync(path.join(logDir, "whatsapp.log"), logMessage + "\n");
+    } catch (error) {
+      console.error("Could not write to log file:", error.message);
+    }
+  }
+};
+
+log(`Running in ${isProduction ? "PRODUCTION" : "DEVELOPMENT"} mode`);
+log(
   `System memory: ${
     process.memoryUsage().heapTotal / 1024 / 1024
   } MB heap total`
@@ -26,7 +50,7 @@ const MAX_RETRIES = 5;
 
 // Simple logging middleware
 app.use((req, res, next) => {
-  console.log(`[${new Date().toISOString()}] ${req.method} ${req.url}`);
+  log(`${req.method} ${req.url}`);
   next();
 });
 
@@ -34,10 +58,10 @@ app.use((req, res, next) => {
 const authPath = "./auth_data";
 if (!fs.existsSync(authPath)) {
   fs.mkdirSync(authPath, { recursive: true });
-  console.log("Created auth_data directory");
+  log("Created auth_data directory");
 }
 
-// Enhanced configuration for Render.com compatibility with ultra-low memory settings
+// Configuration optimized for DigitalOcean droplets
 const puppeteerConfig = {
   headless: true,
   args: [
@@ -46,70 +70,33 @@ const puppeteerConfig = {
     "--disable-dev-shm-usage",
     "--disable-accelerated-2d-canvas",
     "--no-first-run",
-    "--no-zygote",
-    "--single-process",
     "--disable-gpu",
     "--disable-extensions",
     "--disable-software-rasterizer",
-    "--disable-features=site-per-process",
-    // Ultra aggressive memory limits
-    "--js-flags=--max-old-space-size=128",
-    "--disable-web-security",
-    "--window-size=640,480", // Smaller viewport
-    "--disable-notifications",
-    "--disable-desktop-notifications",
-    "--mute-audio",
-    "--disable-speech-api",
-    "--hide-scrollbars",
-    "--remote-debugging-port=0",
-    "--disable-background-networking",
-    "--disable-background-timer-throttling",
-    "--disable-backgrounding-occluded-windows",
-    "--disable-breakpad",
-    "--disable-client-side-phishing-detection",
-    "--disable-hang-monitor",
-    "--disable-popup-blocking",
-    "--disable-sync",
-    "--disable-translate",
-    "--disable-domain-reliability",
-    "--disable-infobars",
-    "--disable-features=TranslateUI",
-    "--disable-session-crashed-bubble",
+    // We can be less aggressive with memory limits on DO
+    "--js-flags=--max-old-space-size=256",
   ],
-  // Important for Render.com
   executablePath: isProduction ? "/usr/bin/google-chrome-stable" : undefined,
-  // Increased timeout for slower environments like Render
   timeout: 120000,
-  // Smaller viewport to reduce memory usage
   defaultViewport: {
-    width: 640,
-    height: 480,
+    width: 800,
+    height: 600,
   },
   ignoreHTTPSErrors: true,
-  handleSIGINT: false,
-  handleSIGTERM: false,
-  handleSIGHUP: false,
-  // Add connection handling options
-  protocolTimeout: 180000, // Protocol timeout (helps with session closed errors)
-  slowMo: 100, // Slow down operations even more to reduce chance of errors
 };
 
 // Clean up any existing Chrome processes before starting
 if (isProduction) {
   try {
-    console.log("Cleaning up any existing Chrome processes...");
+    log("Cleaning up any existing Chrome processes...");
     require("child_process").execSync("pkill -9 chrome || true");
-
-    // Wait a moment to let processes terminate
-    setTimeout(() => {
-      console.log("Chrome cleanup completed");
-    }, 2000);
+    log("Chrome cleanup completed");
   } catch (error) {
-    console.log("Chrome cleanup attempt (non-critical if it fails)");
+    log("Chrome cleanup attempt (non-critical if it fails)");
   }
 }
 
-// Basic configuration for WhatsApp client
+// WhatsApp client configuration
 const whatsappClient = new Client({
   authStrategy: new LocalAuth({
     dataPath: "./auth_data",
@@ -117,18 +104,18 @@ const whatsappClient = new Client({
   }),
   puppeteer: puppeteerConfig,
   // Longer timeouts for slower environments
-  authTimeoutMs: 600000, // 10 minutes
+  authTimeoutMs: 300000, // 5 minutes (can be lower on DO)
   qrTimeoutMs: 120000, // 2 minutes
-  // Disable caching to reduce memory usage
+  // Use standard caching on DigitalOcean (more resources)
   webVersionCache: {
-    type: "none",
+    type: "remote",
   },
   restartOnAuthFail: true,
 });
 
 // Enhanced QR code handling for production
 whatsappClient.on("qr", (qr) => {
-  console.log("\n=== SCAN THIS QR CODE WITH YOUR WHATSAPP ===");
+  log("\n=== SCAN THIS QR CODE WITH YOUR WHATSAPP ===");
 
   // In development, show QR in terminal
   if (!isProduction) {
@@ -151,7 +138,7 @@ whatsappClient.on("qr", (qr) => {
     try {
       const qrFilePath = path.join(authPath, "latest-qr.txt");
       fs.writeFileSync(qrFilePath, qr);
-      console.log(`QR code also saved to ${qrFilePath}`);
+      log(`QR code also saved to ${qrFilePath}`);
     } catch (error) {
       console.error("Failed to write QR code to file:", error.message);
     }
@@ -160,7 +147,7 @@ whatsappClient.on("qr", (qr) => {
 
 // Client ready handler
 whatsappClient.on("ready", () => {
-  console.log("WhatsApp client is ready and connected");
+  log("WhatsApp client is ready and connected");
 
   // Reset retry counter on successful connection
   initRetries = 0;
@@ -170,7 +157,7 @@ whatsappClient.on("ready", () => {
     const qrFilePath = path.join(authPath, "latest-qr.txt");
     if (fs.existsSync(qrFilePath)) {
       fs.unlinkSync(qrFilePath);
-      console.log("Cleared saved QR code");
+      log("Cleared saved QR code");
     }
   } catch (error) {
     console.error("Error clearing QR code file:", error.message);
@@ -179,17 +166,17 @@ whatsappClient.on("ready", () => {
 
 // Authentication event
 whatsappClient.on("authenticated", () => {
-  console.log("WhatsApp client authenticated successfully");
+  log("WhatsApp client authenticated successfully");
 });
 
 // Handle authentication failure
 whatsappClient.on("auth_failure", (msg) => {
   console.error(`Authentication failure: ${msg}`);
-  console.log("You may need to rescan the QR code.");
+  log("You may need to rescan the QR code.");
 
   // Force clean auth data on failure
   try {
-    console.log("Clearing auth data due to auth failure");
+    log("Clearing auth data due to auth failure");
     if (fs.existsSync(authPath)) {
       fs.readdirSync(authPath).forEach((file) => {
         if (file !== ".gitkeep") {
@@ -213,12 +200,12 @@ whatsappClient.on("auth_failure", (msg) => {
 
 // Disconnection event with enhanced reconnection
 whatsappClient.on("disconnected", (reason) => {
-  console.log(`WhatsApp client disconnected: ${reason}`);
-  console.log("Attempting to reconnect...");
+  log(`WhatsApp client disconnected: ${reason}`);
+  log("Attempting to reconnect...");
 
   // Wait a bit then try to reconnect
   setTimeout(() => {
-    console.log("Reinitializing client...");
+    log("Reinitializing client...");
     // Reset initialization flag
     isInitializing = false;
     initialize().catch((err) => {
@@ -227,11 +214,28 @@ whatsappClient.on("disconnected", (reason) => {
   }, 5000);
 });
 
+// Get details about the connection
+whatsappClient.on("message", async (msg) => {
+  try {
+    // Log incoming messages for debugging
+    const chat = await msg.getChat();
+    const contact = await msg.getContact();
+    log(
+      `Message from ${contact.pushname || contact.number || "Unknown"}: ${
+        msg.body
+      }`
+    );
+    log(`Chat info: ${chat.name}, isGroup: ${chat.isGroup}`);
+  } catch (error) {
+    log(`Error handling incoming message: ${error.message}`);
+  }
+});
+
 // Simplified initialization approach
 const initialize = async () => {
   // Prevent multiple simultaneous initialization attempts
   if (isInitializing) {
-    console.log("Initialization already in progress, skipping duplicate call");
+    log("Initialization already in progress, skipping duplicate call");
     return false;
   }
 
@@ -239,7 +243,7 @@ const initialize = async () => {
 
   // Check if we've exceeded max retries
   if (initRetries >= MAX_RETRIES) {
-    console.log(
+    log(
       `Maximum retries (${MAX_RETRIES}) exceeded. Waiting for manual restart.`
     );
     isInitializing = false;
@@ -247,15 +251,9 @@ const initialize = async () => {
   }
 
   initRetries++;
-  console.log(`Initialization attempt ${initRetries} of ${MAX_RETRIES}`);
+  log(`Initialization attempt ${initRetries} of ${MAX_RETRIES}`);
 
   try {
-    // If we have global gc, run it to free up memory
-    if (global.gc) {
-      console.log("Running garbage collection");
-      global.gc();
-    }
-
     // Wait a moment to let Chrome processes fully terminate
     await new Promise((resolve) => setTimeout(resolve, 3000));
 
@@ -277,7 +275,7 @@ const initialize = async () => {
     // Race between initialization and timeout
     await Promise.race([initPromise, timeoutPromise]);
 
-    console.log("WhatsApp client initialization completed successfully");
+    log("WhatsApp client initialization completed successfully");
     isInitializing = false;
     return true;
   } catch (error) {
@@ -288,21 +286,19 @@ const initialize = async () => {
       error.message.includes("Session closed") ||
       error.message.includes("page has been closed")
     ) {
-      console.log(
-        "Browser session was closed - likely due to memory constraints"
-      );
+      log("Browser session was closed - likely due to memory constraints");
 
       // Higher retry delay when we hit this error
       const retryDelay = 10000 + initRetries * 5000;
-      console.log(`Will retry in ${retryDelay / 1000} seconds...`);
+      log(`Will retry in ${retryDelay / 1000} seconds...`);
 
       // Clean up Chrome processes
       if (isProduction) {
         try {
-          console.log("Cleaning up Chrome processes before retry");
+          log("Cleaning up Chrome processes before retry");
           require("child_process").execSync("pkill -9 chrome || true");
         } catch (e) {
-          console.log("Chrome cleanup attempt (non-critical if it fails)");
+          log("Chrome cleanup attempt (non-critical if it fails)");
         }
       }
 
@@ -311,7 +307,7 @@ const initialize = async () => {
         await initialize();
       }, retryDelay);
     } else if (error.message.includes("timeout")) {
-      console.log(
+      log(
         "Initialization timed out - your server might have limited resources"
       );
 
@@ -354,8 +350,16 @@ app.post("/send-message", async (req, res) => {
       ? number
       : `${number.replace(/[^\d]/g, "")}@c.us`;
 
+    log(`Attempting to send message to ${formattedNumber}`);
+    log(
+      `Message content: ${message.substring(0, 30)}${
+        message.length > 30 ? "..." : ""
+      }`
+    );
+
     // Check if client is ready
     if (!whatsappClient.info) {
+      log("WhatsApp client is not ready, cannot send message");
       return res.status(503).json({
         success: false,
         message: "WhatsApp client is not ready. Please scan the QR code first.",
@@ -367,8 +371,10 @@ app.post("/send-message", async (req, res) => {
       });
     }
 
-    // Send the message
+    // Send the message with improved debugging
+    log(`Sending message to ${formattedNumber}...`);
     const response = await whatsappClient.sendMessage(formattedNumber, message);
+    log(`Message sent with ID: ${JSON.stringify(response.id)}`);
 
     res.status(200).json({
       success: true,
@@ -377,6 +383,7 @@ app.post("/send-message", async (req, res) => {
     });
   } catch (error) {
     console.error("Error sending message:", error);
+    log(`Failed to send message: ${error.message}`);
     res.status(500).json({
       success: false,
       message: "Failed to send message",
@@ -413,14 +420,14 @@ app.get("/health", (req, res) => {
 
 // Add a force reconnect endpoint
 app.post("/force-reconnect", async (req, res) => {
-  console.log("Manual reconnection requested");
+  log("Manual reconnection requested");
 
   try {
     // If browser exists, try to close it
     if (whatsappClient.pupBrowser) {
       try {
         await whatsappClient.pupBrowser.close();
-        console.log("Closed existing browser");
+        log("Closed existing browser");
       } catch (error) {
         console.error("Error closing browser:", error.message);
       }
@@ -429,15 +436,15 @@ app.post("/force-reconnect", async (req, res) => {
     // Clean up Chrome processes
     if (isProduction) {
       try {
-        console.log("Cleaning up Chrome processes");
+        log("Cleaning up Chrome processes");
         require("child_process").execSync("pkill -9 chrome || true");
       } catch (error) {
-        console.log("Chrome cleanup attempt (non-critical if it fails)");
+        log("Chrome cleanup attempt (non-critical if it fails)");
       }
     }
 
     // Clear auth data
-    console.log("Clearing auth data for fresh start");
+    log("Clearing auth data for fresh start");
     try {
       if (fs.existsSync(authPath)) {
         fs.readdirSync(authPath).forEach((file) => {
@@ -449,7 +456,7 @@ app.post("/force-reconnect", async (req, res) => {
               } else {
                 fs.unlinkSync(filePath);
               }
-              console.log(`Removed ${filePath}`);
+              log(`Removed ${filePath}`);
             } catch (removeErr) {
               console.error(`Error removing ${file}:`, removeErr.message);
             }
@@ -467,9 +474,9 @@ app.post("/force-reconnect", async (req, res) => {
     // Wait a moment before reinitializing
     setTimeout(() => {
       // Reinitialize
-      console.log("Reinitializing WhatsApp client");
+      log("Reinitializing WhatsApp client");
       initialize()
-        .then(() => console.log("Reinitialization started"))
+        .then(() => log("Reinitialization started"))
         .catch((err) =>
           console.error("Error during reinitialization:", err.message)
         );
@@ -490,7 +497,7 @@ app.post("/force-reconnect", async (req, res) => {
 });
 
 // Initialize client
-console.log("Initializing WhatsApp client...");
+log("Initializing WhatsApp client...");
 initialize().catch((err) => {
   console.error("Failed to initialize WhatsApp client:", err);
 });
@@ -498,9 +505,6 @@ initialize().catch((err) => {
 // Start server
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, "0.0.0.0", () => {
-  console.log(`Simple WhatsApp Connector running on port ${PORT}`);
-  console.log(`Local URL: http://localhost:${PORT}`);
-  if (process.env.RENDER_EXTERNAL_URL) {
-    console.log(`Public URL: ${process.env.RENDER_EXTERNAL_URL}`);
-  }
+  log(`Simple WhatsApp Connector running on port ${PORT}`);
+  log(`Local URL: http://localhost:${PORT}`);
 });

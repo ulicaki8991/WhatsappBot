@@ -89,113 +89,188 @@ If the application gets stuck, you can force a reconnection:
 }
 ```
 
-## Deploying to Render.com
+## Deploying to DigitalOcean
 
-This application is specially configured to work on Render.com:
+This application can be deployed to DigitalOcean in two ways - either with Docker or directly on the server.
 
-1. **Create a new Web Service**:
-   - Sign up for a Render.com account if you don't have one
-   - Click "New" and select "Web Service"
-   - Connect your GitHub repository
+### Option 1: Direct Installation (Recommended)
 
-2. **Configure the service**:
-   - **Environment**: Select "Docker"
-   - **Name**: Choose a name (e.g., "whatsapp-connector")
-   - **Branch**: Select your branch (e.g., "main")
-   - **Plan**: Choose at least a "Standard" plan (not the free tier as it has memory limitations)
+This approach runs the application directly on the server without Docker, which is simpler and more resource-efficient:
 
-3. **Set up persistent storage**:
-   - In your service settings, go to "Disks" 
-   - Add a new disk:
-     - Name: "whatsapp-auth"
-     - Mount Path: "/app/auth_data"
-     - Size: 1 GB (minimum)
+1. **Create a Droplet**:
+   - Log in to your DigitalOcean account
+   - Create a new Droplet using Ubuntu (20.04 or newer)
+   - Choose a Standard plan with at least 1GB RAM
+   - Add your SSH key
 
-4. **After deployment**:
-   - Authenticate your WhatsApp account by accessing the QR code
-   - The QR code will be printed in the Render logs
-   - You can also access it at the path `/app/auth_data/latest-qr.txt` via the Render shell
+2. **Clone and Deploy**:
+   ```bash
+   # Connect to your droplet
+   ssh root@your-droplet-ip
+   
+   # Clone the repository
+   git clone https://github.com/yourusername/whatsapp-connector.git
+   cd whatsapp-connector
+   
+   # Make the setup script executable
+   chmod +x setup-direct.sh
+   
+   # Run the direct setup script
+   ./setup-direct.sh
+   ```
 
-### Using the render.yaml
+3. **Scan the QR Code**:
+   - After setup, check the logs or QR code file:
+     ```bash
+     cat /opt/whatsapp-connector/auth_data/latest-qr.txt
+     ```
+   - Use an online QR code generator to create a scannable QR code
+   - Scan with your WhatsApp app to authenticate
 
-Alternatively, if you're using the Blueprint feature:
+### Option 2: Docker Installation
 
-1. Push your code with the `render.yaml` file to a GitHub repository
-2. In Render.com, click "New" → "Blueprint"
-3. Connect to your repository
-4. Render will automatically set up the service with the correct configuration
+If you prefer to use Docker for isolation and containerization:
 
-## Accessing the QR Code on Render.com
+1. **Create a Droplet** as described above
 
-When deploying to Render.com, you'll need to scan a QR code to authenticate:
+2. **Clone and Deploy**:
+   ```bash
+   # Connect to your droplet
+   ssh root@your-droplet-ip
+   
+   # Clone the repository
+   git clone https://github.com/yourusername/whatsapp-connector.git
+   cd whatsapp-connector
+   
+   # Make the setup script executable
+   chmod +x setup-digitalocean.sh
+   
+   # Run the Docker setup script
+   ./setup-digitalocean.sh
+   ```
 
-1. After deploying, go to your service's "Logs" tab in the Render dashboard
-2. Look for a section with "=== SCAN THIS QR CODE WITH YOUR WHATSAPP ===" 
-3. Copy the QR code data (the text between the markers)
-4. Use an online QR code generator (like https://www.the-qrcode-generator.com/) to generate a QR code from this text
-5. Scan the generated QR code with your WhatsApp app
+3. **Scan the QR Code** as described above, but the file will be at: `/root/whatsapp-connector/auth_data/latest-qr.txt`
 
-Alternatively, you can use the Shell to view the QR code:
-1. Go to your service's "Shell" tab
-2. Run: `cat auth_data/latest-qr.txt`
-3. Copy this text and use an online QR code generator
+## Authentication
+
+When you first start the application, you'll need to authenticate by scanning the QR code. After scanning, the authentication will be saved in the `auth_data` directory for future use.
+
+### Accessing the QR Code on DigitalOcean
+
+To authenticate your WhatsApp account on DigitalOcean:
+
+1. **View the QR Code file**:
+   For direct installation:
+   ```bash
+   cat /opt/whatsapp-connector/auth_data/latest-qr.txt
+   ```
+   
+   For Docker installation:
+   ```bash
+   cat /root/whatsapp-connector/auth_data/latest-qr.txt
+   ```
+
+2. **Generate a scannable QR**:
+   - Copy the text content from the file
+   - Paste it into an online QR code generator (like https://www.the-qrcode-generator.com/)
+   - Scan the resulting QR code with your WhatsApp app
+
+3. **Verify Connection**:
+   ```bash
+   curl http://localhost:3000/health
+   ```
+   Check that `whatsappConnected` is `true`
+
+## Managing the Service
+
+### For Direct Installation
+
+```bash
+# Check service status
+systemctl status whatsapp-connector
+
+# Restart the service
+systemctl restart whatsapp-connector
+
+# View logs
+journalctl -u whatsapp-connector -f
+
+# Check application logs
+cat /opt/whatsapp-connector/logs/whatsapp.log
+```
+
+### For Docker Installation
+
+```bash
+# Check docker container status
+docker ps -a | grep whatsapp-connector
+
+# Restart the container
+docker restart whatsapp-connector
+
+# View container logs
+docker logs -f whatsapp-connector
+
+# Check application logs
+cat /root/whatsapp-connector/logs/whatsapp.log
+```
 
 ## Troubleshooting
 
-### Handling "Session closed" Errors
+### Common Issues and Solutions
 
-If you see errors like:
-```
-Failed to initialize WhatsApp client: Error: Protocol error (Network.setUserAgentOverride): Session closed. Most likely the page has been closed.
-```
+1. **"Session closed" errors**:
+   - If you see errors about session being closed, it might indicate memory issues.
+   - Solution: Restart the service with `systemctl restart whatsapp-connector` or `docker restart whatsapp-connector` depending on your installation method
 
-This typically means Chrome is crashing due to memory limitations. Here's how to fix it:
+2. **Unable to authenticate**:
+   - Try forcing a reconnection:
+     ```bash
+     curl -X POST http://localhost:3000/force-reconnect
+     ```
+   - Then scan the new QR code
 
-1. **Ensure you're using a Standard plan or higher** - Free tier on Render.com doesn't have enough memory for Chrome.
+3. **Messages not being delivered**:
+   - Make sure the phone number format is correct (include country code)
+   - Have the recipient send you a message first
+   - Check if your WhatsApp account has any restrictions
 
-2. **Use the force reconnect endpoint** to clear everything and start fresh:
-   ```
-   curl -X POST https://your-render-url.onrender.com/force-reconnect
-   ```
-
-3. **Check if your service is out of memory**:
-   - Go to the "Logs" tab in Render dashboard
-   - Look for "Memory stats" output from the monitoring script
-   - If you see values close to the limit, you may need to upgrade your plan
-
-4. **Manual recovery**:
-   - Go to the "Shell" tab in Render dashboard
-   - Run: `pkill -9 chrome` to kill any stuck Chrome processes
-   - Run: `rm -rf /app/auth_data/*` to clear authentication data
-   - Restart the service from the Render dashboard
-
-### Auto-Retry Logic
-
-The application includes built-in retry logic that will attempt to reconnect up to 5 times with increasing delays. You can monitor this process through the `/health` endpoint which shows the current retry status.
-
-### Memory Usage Optimization
-
-This application is highly optimized for low memory environments:
-
-- Chrome is configured with minimal resource usage flags
-- The Node.js heap size is limited to prevent OOM errors
-- A memory monitoring script runs in the background to track usage
-
-If you still experience memory issues, consider:
-
-1. Upgrading to a higher Render.com plan with more memory
-2. Further reducing Chrome memory usage by editing the puppeteer configuration in `src/simple-whatsapp.js`
-
-## Environment Variables
-
-- `PORT`: The port the server will run on (default: 3000)
-- `NODE_ENV`: Set to "production" when deploying to Render.com
-- `NODE_OPTIONS`: Set to "--max_old_space_size=384" to limit Node.js memory usage
+4. **Application crashes or restarts**:
+   - Check the system logs using the commands in the "Managing the Service" section
+   - Ensure your droplet has enough memory (at least 1GB RAM recommended)
 
 ## Usage Example with cURL
 
 ```bash
-curl -X POST https://your-render-url.onrender.com/send-message \
+curl -X POST http://your-droplet-ip:3000/send-message \
   -H "Content-Type: application/json" \
   -d '{"number": "1234567890", "message": "Hello from WhatsApp Connector!"}'
-``` 
+```
+
+## Security Recommendations
+
+For production use, consider these security enhancements:
+
+1. **Set up a firewall**:
+   ```bash
+   ufw allow 22/tcp  # SSH
+   ufw allow 3000/tcp  # WhatsApp Connector API
+   ufw enable
+   ```
+
+2. **Add HTTPS with Nginx and Let's Encrypt**:
+   ```bash
+   apt-get install -y nginx certbot python3-certbot-nginx
+   # Configure Nginx as reverse proxy (see separate instructions)
+   certbot --nginx -d yourdomain.com
+   ```
+
+3. **Add API authentication**:
+   - Modify the code to include API key validation
+   - Use environment variables to set the API key
+
+## Environment Variables
+
+- `PORT`: The port the server will run on (default: 3000)
+- `NODE_ENV`: Set to "production" when deploying
+- `NODE_OPTIONS`: Set to "--max_old_space_size=512" to limit Node.js memory usage 

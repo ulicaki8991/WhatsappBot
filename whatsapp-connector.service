@@ -1,0 +1,18 @@
+[Unit]
+Description=WhatsApp Connector Service
+After=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/root/whatsapp-connector
+ExecStart=/usr/bin/docker run --name whatsapp-connector -p 3000:3000 -v /root/whatsapp-connector/auth_data:/app/auth_data -v /root/whatsapp-connector/logs:/app/logs whatsapp-connector
+Restart=on-failure
+RestartSec=10
+StandardOutput=syslog
+StandardError=syslog
+SyslogIdentifier=whatsapp-connector
+Environment=NODE_ENV=production
+
+[Install]
+WantedBy=multi-user.target 

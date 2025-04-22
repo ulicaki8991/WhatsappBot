@@ -4,13 +4,11 @@ FROM node:16-slim
 ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true
 ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/google-chrome-stable
 ENV NODE_ENV=production
-ENV NODE_OPTIONS="--max_old_space_size=384"
-# Add extra Chrome flags
-ENV CHROME_EXTRA_FLAGS="--disable-dev-shm-usage --disable-software-rasterizer --no-sandbox --disable-setuid-sandbox"
+ENV NODE_OPTIONS="--max_old_space_size=512"
 
-# Install minimal Chrome dependencies for Puppeteer
+# Install Chrome dependencies and system utilities for monitoring
 RUN apt-get update \
-    && apt-get install -y wget gnupg \
+    && apt-get install -y wget gnupg procps curl htop vim \
     && wget -q -O - https://dl-ssl.google.com/linux/linux_signing_key.pub | apt-key add - \
     && sh -c 'echo "deb [arch=amd64] http://dl.google.com/linux/chrome/deb/ stable main" >> /etc/apt/sources.list.d/google.list' \
     && apt-get update \
@@ -29,29 +27,45 @@ WORKDIR /app
 COPY package*.json ./
 
 # Install app dependencies 
-RUN npm install --production --no-optional --no-audit
+RUN npm install --production --no-audit
 
 # Copy project files
 COPY . .
 
 # Verify Chrome installation
-RUN echo "Chrome version: $(google-chrome-stable --version || echo 'not installed')"
+RUN echo "Chrome version: $(google-chrome-stable --version)"
 
-# Create memory monitoring script
+# Create improved startup script with better error handling and memory optimization
 RUN echo '#!/bin/bash\n\
-while true; do\n\
-  echo "Memory stats $(date):"\n\
-  free -m\n\
-  echo "Chrome processes:"\n\
-  ps -o pid,rss,command | grep chrome | grep -v grep\n\
-  echo "Node processes:"\n\
-  ps -o pid,rss,command | grep node | grep -v grep\n\
-  echo "-----------------------------------"\n\
+echo "Starting WhatsApp Connector service at $(date)"\n\
+echo "System information:"\n\
+free -m\n\
+echo "Node version: $(node -v)"\n\
+echo "Chrome version: $(google-chrome-stable --version)"\n\
+\n\
+# Clean up any stray Chrome processes before starting\n\
+pkill -9 chrome || true\n\
+\n\
+# Create a memory monitor in background\n\
+(while true; do\n\
+  echo "[$(date)] Memory usage (MB):" >> /app/logs/memory_monitor.log\n\
+  free -m | grep "Mem:" >> /app/logs/memory_monitor.log\n\
+  echo "[$(date)] Node memory:" >> /app/logs/memory_monitor.log\n\
+  ps -o pid,rss,command | grep "node" | grep -v grep >> /app/logs/memory_monitor.log\n\
+  echo "[$(date)] Chrome memory:" >> /app/logs/memory_monitor.log\n\
+  ps -o pid,rss,command | grep "chrome" | grep -v grep >> /app/logs/memory_monitor.log\n\
   sleep 60\n\
-done' > /app/monitor.sh && chmod +x /app/monitor.sh
+done) &\n\
+\n\
+# Start the application\n\
+node src/simple-whatsapp.js\n\
+' > /app/start.sh && chmod +x /app/start.sh
+
+# Create logs directory
+RUN mkdir -p /app/logs && chmod 777 /app/logs
 
 # Expose the port
 EXPOSE 3000
 
-# Start the app with the memory monitor in background
-CMD /app/monitor.sh & node src/simple-whatsapp.js 
+# Start the app
+CMD ["/app/start.sh"] 
