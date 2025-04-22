@@ -9,10 +9,20 @@ const isProduction =
   process.env.NODE_ENV === "production" || process.env.RENDER === "true";
 
 console.log(`Running in ${isProduction ? "PRODUCTION" : "DEVELOPMENT"} mode`);
+console.log(
+  `System memory: ${
+    process.memoryUsage().heapTotal / 1024 / 1024
+  } MB heap total`
+);
 
 // Create Express app
 const app = express();
 app.use(express.json());
+
+// Add initialization flag to prevent multiple calls
+let isInitializing = false;
+let initRetries = 0;
+const MAX_RETRIES = 5;
 
 // Simple logging middleware
 app.use((req, res, next) => {
@@ -27,7 +37,7 @@ if (!fs.existsSync(authPath)) {
   console.log("Created auth_data directory");
 }
 
-// Enhanced configuration for Render.com compatibility
+// Enhanced configuration for Render.com compatibility with ultra-low memory settings
 const puppeteerConfig = {
   headless: true,
   args: [
@@ -37,15 +47,67 @@ const puppeteerConfig = {
     "--disable-accelerated-2d-canvas",
     "--no-first-run",
     "--no-zygote",
-    "--single-process", // This helps on Render's free tier
+    "--single-process",
     "--disable-gpu",
     "--disable-extensions",
+    "--disable-software-rasterizer",
+    "--disable-features=site-per-process",
+    // Ultra aggressive memory limits
+    "--js-flags=--max-old-space-size=128",
+    "--disable-web-security",
+    "--window-size=640,480", // Smaller viewport
+    "--disable-notifications",
+    "--disable-desktop-notifications",
+    "--mute-audio",
+    "--disable-speech-api",
+    "--hide-scrollbars",
+    "--remote-debugging-port=0",
+    "--disable-background-networking",
+    "--disable-background-timer-throttling",
+    "--disable-backgrounding-occluded-windows",
+    "--disable-breakpad",
+    "--disable-client-side-phishing-detection",
+    "--disable-hang-monitor",
+    "--disable-popup-blocking",
+    "--disable-sync",
+    "--disable-translate",
+    "--disable-domain-reliability",
+    "--disable-infobars",
+    "--disable-features=TranslateUI",
+    "--disable-session-crashed-bubble",
   ],
   // Important for Render.com
   executablePath: isProduction ? "/usr/bin/google-chrome-stable" : undefined,
   // Increased timeout for slower environments like Render
   timeout: 120000,
+  // Smaller viewport to reduce memory usage
+  defaultViewport: {
+    width: 640,
+    height: 480,
+  },
+  ignoreHTTPSErrors: true,
+  handleSIGINT: false,
+  handleSIGTERM: false,
+  handleSIGHUP: false,
+  // Add connection handling options
+  protocolTimeout: 180000, // Protocol timeout (helps with session closed errors)
+  slowMo: 100, // Slow down operations even more to reduce chance of errors
 };
+
+// Clean up any existing Chrome processes before starting
+if (isProduction) {
+  try {
+    console.log("Cleaning up any existing Chrome processes...");
+    require("child_process").execSync("pkill -9 chrome || true");
+
+    // Wait a moment to let processes terminate
+    setTimeout(() => {
+      console.log("Chrome cleanup completed");
+    }, 2000);
+  } catch (error) {
+    console.log("Chrome cleanup attempt (non-critical if it fails)");
+  }
+}
 
 // Basic configuration for WhatsApp client
 const whatsappClient = new Client({
@@ -57,6 +119,11 @@ const whatsappClient = new Client({
   // Longer timeouts for slower environments
   authTimeoutMs: 600000, // 10 minutes
   qrTimeoutMs: 120000, // 2 minutes
+  // Disable caching to reduce memory usage
+  webVersionCache: {
+    type: "none",
+  },
+  restartOnAuthFail: true,
 });
 
 // Enhanced QR code handling for production
@@ -95,6 +162,9 @@ whatsappClient.on("qr", (qr) => {
 whatsappClient.on("ready", () => {
   console.log("WhatsApp client is ready and connected");
 
+  // Reset retry counter on successful connection
+  initRetries = 0;
+
   // Clear any stored QR code when ready
   try {
     const qrFilePath = path.join(authPath, "latest-qr.txt");
@@ -116,6 +186,29 @@ whatsappClient.on("authenticated", () => {
 whatsappClient.on("auth_failure", (msg) => {
   console.error(`Authentication failure: ${msg}`);
   console.log("You may need to rescan the QR code.");
+
+  // Force clean auth data on failure
+  try {
+    console.log("Clearing auth data due to auth failure");
+    if (fs.existsSync(authPath)) {
+      fs.readdirSync(authPath).forEach((file) => {
+        if (file !== ".gitkeep") {
+          try {
+            const filePath = path.join(authPath, file);
+            if (fs.lstatSync(filePath).isDirectory()) {
+              fs.rmSync(filePath, { recursive: true, force: true });
+            } else {
+              fs.unlinkSync(filePath);
+            }
+          } catch (error) {
+            console.error(`Error removing ${file}:`, error.message);
+          }
+        }
+      });
+    }
+  } catch (error) {
+    console.error("Error clearing auth data:", error.message);
+  }
 });
 
 // Disconnection event with enhanced reconnection
@@ -126,11 +219,122 @@ whatsappClient.on("disconnected", (reason) => {
   // Wait a bit then try to reconnect
   setTimeout(() => {
     console.log("Reinitializing client...");
-    whatsappClient.initialize().catch((err) => {
+    // Reset initialization flag
+    isInitializing = false;
+    initialize().catch((err) => {
       console.error("Failed to reinitialize:", err);
     });
   }, 5000);
 });
+
+// Simplified initialization approach
+const initialize = async () => {
+  // Prevent multiple simultaneous initialization attempts
+  if (isInitializing) {
+    console.log("Initialization already in progress, skipping duplicate call");
+    return false;
+  }
+
+  isInitializing = true;
+
+  // Check if we've exceeded max retries
+  if (initRetries >= MAX_RETRIES) {
+    console.log(
+      `Maximum retries (${MAX_RETRIES}) exceeded. Waiting for manual restart.`
+    );
+    isInitializing = false;
+    return false;
+  }
+
+  initRetries++;
+  console.log(`Initialization attempt ${initRetries} of ${MAX_RETRIES}`);
+
+  try {
+    // If we have global gc, run it to free up memory
+    if (global.gc) {
+      console.log("Running garbage collection");
+      global.gc();
+    }
+
+    // Wait a moment to let Chrome processes fully terminate
+    await new Promise((resolve) => setTimeout(resolve, 3000));
+
+    // Use a safer approach to initialization with longer timeouts
+    const timeoutMs = 300000; // 5 minutes
+    const initPromise = Client.prototype.initialize.call(whatsappClient);
+    const timeoutPromise = new Promise((_, reject) => {
+      setTimeout(
+        () =>
+          reject(
+            new Error(
+              `Initialization timed out after ${timeoutMs / 60000} minutes`
+            )
+          ),
+        timeoutMs
+      );
+    });
+
+    // Race between initialization and timeout
+    await Promise.race([initPromise, timeoutPromise]);
+
+    console.log("WhatsApp client initialization completed successfully");
+    isInitializing = false;
+    return true;
+  } catch (error) {
+    console.error(`WhatsApp client initialization failed: ${error.message}`);
+
+    // More specific error handling
+    if (
+      error.message.includes("Session closed") ||
+      error.message.includes("page has been closed")
+    ) {
+      console.log(
+        "Browser session was closed - likely due to memory constraints"
+      );
+
+      // Higher retry delay when we hit this error
+      const retryDelay = 10000 + initRetries * 5000;
+      console.log(`Will retry in ${retryDelay / 1000} seconds...`);
+
+      // Clean up Chrome processes
+      if (isProduction) {
+        try {
+          console.log("Cleaning up Chrome processes before retry");
+          require("child_process").execSync("pkill -9 chrome || true");
+        } catch (e) {
+          console.log("Chrome cleanup attempt (non-critical if it fails)");
+        }
+      }
+
+      setTimeout(async () => {
+        isInitializing = false;
+        await initialize();
+      }, retryDelay);
+    } else if (error.message.includes("timeout")) {
+      console.log(
+        "Initialization timed out - your server might have limited resources"
+      );
+
+      // Still try to recover with a longer delay
+      setTimeout(async () => {
+        isInitializing = false;
+        await initialize();
+      }, 15000);
+    } else {
+      // General retry for other errors
+      setTimeout(async () => {
+        isInitializing = false;
+        await initialize();
+      }, 5000);
+    }
+
+    isInitializing = false;
+    return false;
+  }
+};
+
+// Replace the default initialize method with our custom one
+whatsappClient.initialize = initialize;
 
 // The single endpoint to send a message
 app.post("/send-message", async (req, res) => {
@@ -155,6 +359,11 @@ app.post("/send-message", async (req, res) => {
       return res.status(503).json({
         success: false,
         message: "WhatsApp client is not ready. Please scan the QR code first.",
+        initializationStatus: {
+          isInitializing: isInitializing,
+          currentRetry: initRetries,
+          maxRetries: MAX_RETRIES,
+        },
       });
     }
 
@@ -185,6 +394,20 @@ app.get("/health", (req, res) => {
     environment: isProduction ? "production" : "development",
     timestamp: new Date().toISOString(),
     qrCodeAvailable: fs.existsSync(path.join(authPath, "latest-qr.txt")),
+    initializationStatus: {
+      isInitializing: isInitializing,
+      currentRetry: initRetries,
+      maxRetries: MAX_RETRIES,
+    },
+    memory: {
+      heapTotal: `${Math.round(
+        process.memoryUsage().heapTotal / 1024 / 1024
+      )} MB`,
+      heapUsed: `${Math.round(
+        process.memoryUsage().heapUsed / 1024 / 1024
+      )} MB`,
+      rss: `${Math.round(process.memoryUsage().rss / 1024 / 1024)} MB`,
+    },
   });
 });
 
@@ -200,6 +423,16 @@ app.post("/force-reconnect", async (req, res) => {
         console.log("Closed existing browser");
       } catch (error) {
         console.error("Error closing browser:", error.message);
+      }
+    }
+
+    // Clean up Chrome processes
+    if (isProduction) {
+      try {
+        console.log("Cleaning up Chrome processes");
+        require("child_process").execSync("pkill -9 chrome || true");
+      } catch (error) {
+        console.log("Chrome cleanup attempt (non-critical if it fails)");
       }
     }
 
@@ -227,14 +460,20 @@ app.post("/force-reconnect", async (req, res) => {
       console.error("Error clearing auth data:", error.message);
     }
 
-    // Reinitialize
-    console.log("Reinitializing WhatsApp client");
-    whatsappClient
-      .initialize()
-      .then(() => console.log("Reinitialization started"))
-      .catch((err) =>
-        console.error("Error during reinitialization:", err.message)
-      );
+    // Reset flags
+    isInitializing = false;
+    initRetries = 0;
+
+    // Wait a moment before reinitializing
+    setTimeout(() => {
+      // Reinitialize
+      console.log("Reinitializing WhatsApp client");
+      initialize()
+        .then(() => console.log("Reinitialization started"))
+        .catch((err) =>
+          console.error("Error during reinitialization:", err.message)
+        );
+    }, 3000);
 
     res.status(200).json({
       success: true,
@@ -252,7 +491,7 @@ app.post("/force-reconnect", async (req, res) => {
 
 // Initialize client
 console.log("Initializing WhatsApp client...");
-whatsappClient.initialize().catch((err) => {
+initialize().catch((err) => {
   console.error("Failed to initialize WhatsApp client:", err);
 });
 

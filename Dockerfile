@@ -1,77 +1,57 @@
-FROM node:16
+FROM node:16-slim
 
-# Install dependencies for Puppeteer
-RUN apt-get update && apt-get install -y \
-    gconf-service \
-    libasound2 \
-    libatk1.0-0 \
-    libatk-bridge2.0-0 \
-    libc6 \
-    libcairo2 \
-    libcups2 \
-    libdbus-1-3 \
-    libexpat1 \
-    libfontconfig1 \
-    libgcc1 \
-    libgconf-2-4 \
-    libgdk-pixbuf2.0-0 \
-    libglib2.0-0 \
-    libgtk-3-0 \
-    libnspr4 \
-    libpango-1.0-0 \
-    libpangocairo-1.0-0 \
-    libstdc++6 \
-    libx11-6 \
-    libx11-xcb1 \
-    libxcb1 \
-    libxcomposite1 \
-    libxcursor1 \
-    libxdamage1 \
-    libxext6 \
-    libxfixes3 \
-    libxi6 \
-    libxrandr2 \
-    libxrender1 \
-    libxss1 \
-    libxtst6 \
-    ca-certificates \
-    fonts-liberation \
-    fonts-noto-color-emoji \
-    libappindicator1 \
-    libnss3 \
-    lsb-release \
-    xdg-utils \
-    wget \
-    xvfb \
-    && rm -rf /var/lib/apt/lists/*
+# Set environment variables for better Chrome behavior
+ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true
+ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/google-chrome-stable
+ENV NODE_ENV=production
+ENV NODE_OPTIONS="--max_old_space_size=384"
+# Add extra Chrome flags
+ENV CHROME_EXTRA_FLAGS="--disable-dev-shm-usage --disable-software-rasterizer --no-sandbox --disable-setuid-sandbox"
 
-# Install latest Google Chrome
-RUN wget -q -O - https://dl-ssl.google.com/linux/linux_signing_key.pub | apt-key add - \
-    && echo "deb [arch=amd64] http://dl.google.com/linux/chrome/deb/ stable main" >> /etc/apt/sources.list.d/google.list \
+# Install minimal Chrome dependencies for Puppeteer
+RUN apt-get update \
+    && apt-get install -y wget gnupg \
+    && wget -q -O - https://dl-ssl.google.com/linux/linux_signing_key.pub | apt-key add - \
+    && sh -c 'echo "deb [arch=amd64] http://dl.google.com/linux/chrome/deb/ stable main" >> /etc/apt/sources.list.d/google.list' \
     && apt-get update \
-    && apt-get install -y google-chrome-stable \
+    && apt-get install -y google-chrome-stable fonts-noto-color-emoji \
+      --no-install-recommends \
+    && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
-# Set up working directory
+# Create and ensure proper permissions for auth data directory
+RUN mkdir -p /app/auth_data && chmod -R 777 /app/auth_data
+
+# Set working directory
 WORKDIR /app
 
-# Copy package files
+# Copy package.json and package-lock.json
 COPY package*.json ./
 
-# Install dependencies
-RUN npm install
+# Install app dependencies 
+RUN npm install --production --no-optional --no-audit
 
 # Copy project files
 COPY . .
 
-# Make sure auth_data directory exists
-RUN mkdir -p auth_data
+# Verify Chrome installation
+RUN echo "Chrome version: $(google-chrome-stable --version || echo 'not installed')"
 
-# Set environment to production
-ENV NODE_ENV=production
+# Create memory monitoring script
+RUN echo '#!/bin/bash\n\
+while true; do\n\
+  echo "Memory stats $(date):"\n\
+  free -m\n\
+  echo "Chrome processes:"\n\
+  ps -o pid,rss,command | grep chrome | grep -v grep\n\
+  echo "Node processes:"\n\
+  ps -o pid,rss,command | grep node | grep -v grep\n\
+  echo "-----------------------------------"\n\
+  sleep 60\n\
+done' > /app/monitor.sh && chmod +x /app/monitor.sh
 
 # Expose the port
 EXPOSE 3000
 
-# Start the app
-CMD ["node", "src/simple-whatsapp.js"] 
+# Start the app with the memory monitor in background
+CMD /app/monitor.sh & node src/simple-whatsapp.js 

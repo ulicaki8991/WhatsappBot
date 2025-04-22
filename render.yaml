@@ -7,10 +7,16 @@ services:
     branch: main
     healthCheckPath: /health
     dockerfilePath: ./Dockerfile
-    dockerCommand: node src/simple-whatsapp.js
+    dockerCommand: /app/monitor.sh & node src/simple-whatsapp.js
+    autoDeploy: false # Disable auto-deploy to prevent issues during development
     envVars:
       - key: NODE_ENV
         value: production
+      - key: NODE_OPTIONS
+        value: --max_old_space_size=384
+    scaling:
+      minInstances: 1
+      maxInstances: 1 # Prevent scaling to ensure state consistency
     disk:
       name: whatsapp-auth
       mountPath: /app/auth_data

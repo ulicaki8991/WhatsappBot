@@ -61,7 +61,17 @@ When you first start the application, you'll need to authenticate by scanning th
   "uptime": 123.45,
   "environment": "production",
   "timestamp": "2023-05-01T12:00:00.000Z",
-  "qrCodeAvailable": false
+  "qrCodeAvailable": false,
+  "initializationStatus": {
+    "isInitializing": false,
+    "currentRetry": 0,
+    "maxRetries": 5
+  },
+  "memory": {
+    "heapTotal": "80 MB",
+    "heapUsed": "42 MB",
+    "rss": "102 MB"
+  }
 }
 ```
 
@@ -132,17 +142,55 @@ Alternatively, you can use the Shell to view the QR code:
 
 ## Troubleshooting
 
-If the application fails to connect:
+### Handling "Session closed" Errors
 
-1. Use the `/force-reconnect` endpoint to clear authentication data and restart
-2. Check the logs for error messages
-3. If running on Render.com, make sure you're using at least the "Standard" plan, not the free tier
-4. Ensure the authentication data is being saved to a persistent disk
+If you see errors like:
+```
+Failed to initialize WhatsApp client: Error: Protocol error (Network.setUserAgentOverride): Session closed. Most likely the page has been closed.
+```
+
+This typically means Chrome is crashing due to memory limitations. Here's how to fix it:
+
+1. **Ensure you're using a Standard plan or higher** - Free tier on Render.com doesn't have enough memory for Chrome.
+
+2. **Use the force reconnect endpoint** to clear everything and start fresh:
+   ```
+   curl -X POST https://your-render-url.onrender.com/force-reconnect
+   ```
+
+3. **Check if your service is out of memory**:
+   - Go to the "Logs" tab in Render dashboard
+   - Look for "Memory stats" output from the monitoring script
+   - If you see values close to the limit, you may need to upgrade your plan
+
+4. **Manual recovery**:
+   - Go to the "Shell" tab in Render dashboard
+   - Run: `pkill -9 chrome` to kill any stuck Chrome processes
+   - Run: `rm -rf /app/auth_data/*` to clear authentication data
+   - Restart the service from the Render dashboard
+
+### Auto-Retry Logic
+
+The application includes built-in retry logic that will attempt to reconnect up to 5 times with increasing delays. You can monitor this process through the `/health` endpoint which shows the current retry status.
+
+### Memory Usage Optimization
+
+This application is highly optimized for low memory environments:
+
+- Chrome is configured with minimal resource usage flags
+- The Node.js heap size is limited to prevent OOM errors
+- A memory monitoring script runs in the background to track usage
+
+If you still experience memory issues, consider:
+
+1. Upgrading to a higher Render.com plan with more memory
+2. Further reducing Chrome memory usage by editing the puppeteer configuration in `src/simple-whatsapp.js`
 
 ## Environment Variables
 
 - `PORT`: The port the server will run on (default: 3000)
 - `NODE_ENV`: Set to "production" when deploying to Render.com
+- `NODE_OPTIONS`: Set to "--max_old_space_size=384" to limit Node.js memory usage
 
 ## Usage Example with cURL
 
